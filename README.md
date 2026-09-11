@@ -11,4 +11,4 @@
 - All your scores, stored in one place.
 - View your scores and analytics!
 
-### Keep Track of Future Updates! Check DevLog for more info ###
+### Keep Track of Future Updates! Check Wiki for more info! ###
