@@ -12,3 +12,5 @@
 - View your scores and analytics!
 
 ### Keep Track of Future Updates! Check Wiki for more info! ###
+
+## This is an unfinished version! It is under production! ##
