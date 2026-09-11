@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash BLOB NOT NULL,
+    salt BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    runs INTEGER NOT NULL,
+    wickets INTEGER NOT NULL,
+    balls INTEGER NOT NULL,
+    fours INTEGER NOT NULL,
+    sixes INTEGER NOT NULL,
+    played_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);

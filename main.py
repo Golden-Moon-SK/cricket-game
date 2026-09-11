@@ -1,0 +1,748 @@
+"""8-BIT CRICKET — retro arcade batting with real local accounts."""
+
+from __future__ import annotations
+
+import math
+import random
+from dataclasses import dataclass, field
+
+import pygame
+
+import auth
+from pixel import blit_text, blit_text_center, dither_rect, scanlines, text_width
+
+# NES-ish internal canvas, nearest-neighbor scaled
+W, H = 320, 180
+SCALE = 4
+FPS = 60
+
+NAVY = (16, 20, 56)
+NAVY2 = (28, 36, 88)
+SKY = (48, 72, 168)
+SKY2 = (72, 108, 196)
+GRASS = (40, 120, 48)
+GRASS2 = (28, 92, 36)
+PITCH = (196, 164, 92)
+PITCH2 = (176, 140, 72)
+CREAM = (248, 232, 176)
+WHITE = (248, 248, 248)
+RED = (200, 36, 48)
+DARK_RED = (128, 16, 32)
+GOLD = (248, 184, 48)
+BLACK = (8, 8, 16)
+WOOD = (168, 108, 40)
+SKIN = (232, 176, 120)
+BLUE = (48, 80, 176)
+CYAN = (88, 220, 220)
+PINK = (248, 120, 168)
+GRAY = (72, 80, 104)
+
+MAX_OVERS = 5
+MAX_WICKETS = 3
+
+
+@dataclass
+class Match:
+    runs: int = 0
+    wickets: int = 0
+    balls: int = 0
+    fours: int = 0
+    sixes: int = 0
+    last_result: str = "PLAY"
+    combo: int = 0
+    over_runs: list[str] = field(default_factory=list)
+
+    @property
+    def overs_text(self) -> str:
+        return f"{self.balls // 6}.{self.balls % 6}"
+
+    @property
+    def finished(self) -> bool:
+        return self.wickets >= MAX_WICKETS or self.balls >= MAX_OVERS * 6
+
+
+class Chip:
+    def __init__(self, text: str, color: tuple[int, int, int], life: int = 70) -> None:
+        self.text = text
+        self.color = color
+        self.life = life
+        self.max_life = life
+        self.y = 70
+
+    def tick(self) -> None:
+        self.life -= 1
+        self.y -= 0.35
+
+    @property
+    def alive(self) -> bool:
+        return self.life > 0
+
+
+class CricketGame:
+    def __init__(self) -> None:
+        pygame.init()
+        pygame.display.set_caption("8-BIT CRICKET")
+        self.window = pygame.display.set_mode((W * SCALE, H * SCALE))
+        self.canvas = pygame.Surface((W, H))
+        self.clock = pygame.time.Clock()
+        self.running = True
+
+        self.state = "TITLE"
+        self.user: auth.User | None = None
+        self.auth_mode = "LOGIN"
+        self.field = "username"
+        self.username = ""
+        self.password = ""
+        self.flash = ""
+        self.flash_timer = 0
+        self.cursor_blink = 0
+        self.menu_index = 0
+        self.title_tick = 0
+
+        self.match = Match()
+        self.phase = "idle"
+        self.phase_t = 0
+        self.bowler_x = 40
+        self.ball_x = 0.0
+        self.ball_y = 0.0
+        self.ball_z = 0.0
+        self.timing = 0.0
+        self.timing_dir = 1
+        self.timing_speed = 0.016
+        self.sweet_spot = 0.52
+        self.shot = "DRIVE"
+        self.shot_index = 1
+        self.swung = False
+        self.ball_kind = "PACE"
+        self.ball_frames = 48
+        self.ball_line = 0.0
+        self.ball_length = 0.5
+        self.land_x = 160.0
+        self.land_y = 104.0
+        self.bounce_t = 0.55
+        self.chips: list[Chip] = []
+        self.crowd = [random.choice((PINK, CYAN, GOLD, WHITE, RED)) for _ in range(180)]
+        self.records: list[dict] = []
+        self.board: list[tuple[str, int]] = []
+
+        auth.init_db()
+        self._beep_init()
+
+    def _beep_init(self) -> None:
+        try:
+            pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=256)
+            self.sfx_ok = self._tone(880, 80)
+            self.sfx_bad = self._tone(140, 160)
+            self.sfx_six = self._tone(1320, 120)
+            self.sfx_bowl = self._tone(220, 60)
+        except pygame.error:
+            self.sfx_ok = self.sfx_bad = self.sfx_six = self.sfx_bowl = None
+
+    def _tone(self, freq: int, ms: int) -> pygame.mixer.Sound:
+        n = int(22050 * ms / 1000)
+        buf = bytearray()
+        for i in range(n):
+            v = 80 if math.sin(2 * math.pi * freq * i / 22050) > 0 else -80
+            buf += int(v).to_bytes(2, "little", signed=True)
+        return pygame.mixer.Sound(buffer=bytes(buf))
+
+    def play(self, snd: pygame.mixer.Sound | None) -> None:
+        if snd is not None:
+            snd.play()
+
+    def set_flash(self, msg: str, frames: int = 160) -> None:
+        self.flash = msg
+        self.flash_timer = frames
+
+    def run(self) -> None:
+        while self.running:
+            dt = self.clock.tick(FPS)
+            events = pygame.event.get()
+            for e in events:
+                if e.type == pygame.QUIT:
+                    self.running = False
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+                    self._escape()
+            self._update(events, dt)
+            self._draw()
+            scaled = pygame.transform.scale(self.canvas, (W * SCALE, H * SCALE))
+            self.window.blit(scaled, (0, 0))
+            pygame.display.flip()
+        pygame.quit()
+
+    def _escape(self) -> None:
+        if self.state == "TITLE":
+            self.running = False
+        elif self.state in ("AUTH",):
+            self.state = "TITLE"
+        elif self.state in ("MENU", "RECORDS"):
+            self.state = "MENU" if self.state == "RECORDS" else "AUTH"
+            if self.state == "AUTH":
+                self.user = None
+        elif self.state in ("PLAY", "RESULT"):
+            self.state = "MENU"
+
+    def _update(self, events: list[pygame.event.Event], dt: int) -> None:
+        self.title_tick += 1
+        self.cursor_blink += 1
+        if self.flash_timer > 0:
+            self.flash_timer -= 1
+        if self.state == "TITLE":
+            self._title_input(events)
+        elif self.state == "AUTH":
+            self._auth_input(events)
+        elif self.state == "MENU":
+            self._menu_input(events)
+        elif self.state == "RECORDS":
+            self._records_input(events)
+        elif self.state == "PLAY":
+            self._play_update(events)
+        elif self.state == "RESULT":
+            self._result_input(events)
+
+    def _title_input(self, events: list[pygame.event.Event]) -> None:
+        for e in events:
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.play(self.sfx_ok)
+                self.state = "AUTH"
+                self.auth_mode = "LOGIN"
+                self.field = "username"
+                self.username = ""
+                self.password = ""
+
+    def _auth_input(self, events: list[pygame.event.Event]) -> None:
+        for e in events:
+            if e.type != pygame.KEYDOWN:
+                continue
+            if e.key == pygame.K_TAB:
+                self.auth_mode = "SIGNUP" if self.auth_mode == "LOGIN" else "LOGIN"
+                self.play(self.sfx_bowl)
+            elif e.key == pygame.K_UP:
+                self.field = "username"
+            elif e.key == pygame.K_DOWN:
+                self.field = "password"
+            elif e.key == pygame.K_RETURN:
+                self._submit_auth()
+            elif e.key == pygame.K_BACKSPACE:
+                if self.field == "username":
+                    self.username = self.username[:-1]
+                else:
+                    self.password = self.password[:-1]
+            else:
+                ch = e.unicode
+                if not ch or not ch.isprintable():
+                    continue
+                if self.field == "username" and len(self.username) < 16:
+                    if ch.isalnum() or ch in "_-":
+                        self.username += ch
+                elif self.field == "password" and len(self.password) < 24:
+                    self.password += ch
+
+    def _submit_auth(self) -> None:
+        if self.auth_mode == "LOGIN":
+            user, msg = auth.login(self.username, self.password)
+        else:
+            user, msg = auth.signup(self.username, self.password)
+        if user is None:
+            self.play(self.sfx_bad)
+            self.set_flash(msg)
+            return
+        self.play(self.sfx_six)
+        self.user = user
+        self.password = ""
+        self.state = "MENU"
+        self.menu_index = 0
+        self.set_flash(f"HI {user.username.upper()}")
+
+    def _menu_input(self, events: list[pygame.event.Event]) -> None:
+        items = ["BAT NOW", "RECORDS", "LOG OUT"]
+        for e in events:
+            if e.type != pygame.KEYDOWN:
+                continue
+            if e.key in (pygame.K_UP, pygame.K_w):
+                self.menu_index = (self.menu_index - 1) % len(items)
+                self.play(self.sfx_bowl)
+            elif e.key in (pygame.K_DOWN, pygame.K_s):
+                self.menu_index = (self.menu_index + 1) % len(items)
+                self.play(self.sfx_bowl)
+            elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                choice = items[self.menu_index]
+                if choice == "BAT NOW":
+                    self._start_match()
+                elif choice == "RECORDS":
+                    assert self.user is not None
+                    self.user = auth.get_user_by_id(self.user.id)
+                    self.records = auth.recent_matches(self.user.id) if self.user else []
+                    self.board = auth.leaderboard()
+                    self.state = "RECORDS"
+                    self.play(self.sfx_ok)
+                else:
+                    self.user = None
+                    self.state = "AUTH"
+                    self.play(self.sfx_bad)
+
+    def _records_input(self, events: list[pygame.event.Event]) -> None:
+        for e in events:
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+                self.state = "MENU"
+
+    def _result_input(self, events: list[pygame.event.Event]) -> None:
+        for e in events:
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.state = "MENU"
+                self.play(self.sfx_ok)
+
+    def _start_match(self) -> None:
+        self.match = Match()
+        self.phase = "idle"
+        self.phase_t = 0
+        self.chips.clear()
+        self.shot_index = 1
+        self.shot = "DRIVE"
+        self.state = "PLAY"
+        self.play(self.sfx_ok)
+
+    def _play_update(self, events: list[pygame.event.Event]) -> None:
+        shots = ("DEFEND", "DRIVE", "LOFT")
+        for e in events:
+            if e.type != pygame.KEYDOWN:
+                continue
+            if e.key in (pygame.K_LEFT, pygame.K_a):
+                self.shot_index = (self.shot_index - 1) % 3
+                self.shot = shots[self.shot_index]
+            elif e.key in (pygame.K_RIGHT, pygame.K_d):
+                self.shot_index = (self.shot_index + 1) % 3
+                self.shot = shots[self.shot_index]
+            elif e.key == pygame.K_SPACE:
+                if self.phase == "idle":
+                    self._start_delivery()
+                elif self.phase == "ball" and not self.swung:
+                    self._swing()
+
+        if self.phase == "runup":
+            self.phase_t += 1
+            self.bowler_x = 28 + self.phase_t * 1.4
+            if self.phase_t > 28:
+                self.phase = "ball"
+                self.phase_t = 0
+                self.swung = False
+                self.ball_x, self.ball_y, self.ball_z = 78.0, 96.0, 10.0
+                self.play(self.sfx_bowl)
+        elif self.phase == "ball":
+            self.phase_t += 1
+            t = min(1.0, self.phase_t / self.ball_frames)
+            self._fly_ball(t)
+            self.timing += self.timing_speed * self.timing_dir
+            if self.timing > 1:
+                self.timing = 1
+                self.timing_dir = -1
+            if self.timing < 0:
+                self.timing = 0
+                self.timing_dir = 1
+            if t >= 1 and not self.swung:
+                self._resolve_shot(missed=True)
+        elif self.phase == "result":
+            self.phase_t += 1
+            if self.phase_t > 55:
+                if self.match.finished:
+                    self._end_match()
+                else:
+                    self.phase = "idle"
+                    self.phase_t = 0
+                    self.bowler_x = 40
+
+        self.chips = [c for c in self.chips if c.alive]
+        for c in self.chips:
+            c.tick()
+
+    def _start_delivery(self) -> None:
+        self._roll_delivery()
+        self.phase = "runup"
+        self.phase_t = 0
+        self.bowler_x = 28
+        self.match.last_result = "..."
+
+    def _roll_delivery(self) -> None:
+        self.sweet_spot = random.uniform(0.26, 0.74)
+        self.timing_speed = random.uniform(0.012, 0.024)
+        self.timing_dir = random.choice((-1, 1))
+        self.timing = 0.0 if self.timing_dir > 0 else 1.0
+        self.ball_line = random.uniform(-1.0, 1.0)
+        self.ball_length = random.uniform(0.08, 0.92)
+        self.land_x = 208.0 - self.ball_length * 96.0
+        self.land_y = 104.0 + self.ball_line * 10.0
+        self.bounce_t = 0.34 + (1.0 - self.ball_length) * 0.38
+        self.ball_frames = random.randint(42, 60)
+        if self.ball_length < 0.28:
+            length_name = "YORKER"
+            self.ball_frames = random.randint(40, 50)
+        elif self.ball_length < 0.52:
+            length_name = "FULL"
+        elif self.ball_length < 0.76:
+            length_name = "GOOD"
+        else:
+            length_name = "SHORT"
+            self.ball_frames = random.randint(46, 58)
+        if self.ball_line < -0.33:
+            line_name = "LEG"
+        elif self.ball_line > 0.33:
+            line_name = "OFF"
+        else:
+            line_name = "MID"
+        self.ball_kind = f"{length_name} {line_name}"
+
+    def _fly_ball(self, t: float) -> None:
+        bounce = max(0.18, min(0.82, self.bounce_t))
+        if t < bounce:
+            u = t / bounce
+            self.ball_x = 78.0 + u * (self.land_x - 78.0)
+            self.ball_y = 96.0 + u * (self.land_y - 96.0)
+            self.ball_z = 12.0 * (1.0 - u) * (1.0 - u) + 1.0
+        else:
+            u = (t - bounce) / max(0.01, 1.0 - bounce)
+            self.ball_x = self.land_x + u * (246.0 - self.land_x)
+            self.ball_y = self.land_y + math.sin(u * math.pi) * self.ball_line * 3.0
+            self.ball_z = abs(math.sin(u * math.pi)) * (3.5 + self.ball_length * 7.0)
+
+    def _swing(self) -> None:
+        self.swung = True
+        self._resolve_shot(missed=False)
+
+    def _resolve_shot(self, missed: bool) -> None:
+        window = abs(self.timing - self.sweet_spot)
+        shot = self.shot
+        result = "0"
+        runs = 0
+        out = False
+
+        if missed:
+            roll = random.random()
+            if roll < 0.35:
+                out = True
+                result = random.choice(("BOWLED", "LBW"))
+            else:
+                result = "DOT"
+        else:
+            if window < 0.08:
+                if shot == "LOFT":
+                    if random.random() < 0.78:
+                        runs, result = 6, "SIX"
+                    else:
+                        out, result = True, "CAUGHT"
+                elif shot == "DRIVE":
+                    runs, result = (4, "FOUR") if random.random() < 0.7 else (3, "3")
+                else:
+                    runs, result = 1, "1"
+            elif window < 0.18:
+                if shot == "LOFT":
+                    if random.random() < 0.45:
+                        runs, result = 4, "FOUR"
+                    elif random.random() < 0.4:
+                        out, result = True, "CAUGHT"
+                    else:
+                        runs, result = 2, "2"
+                elif shot == "DRIVE":
+                    runs, result = random.choice((1, 2, 2, 4)), "HIT"
+                    if runs == 4:
+                        result = "FOUR"
+                    else:
+                        result = str(runs)
+                else:
+                    runs, result = (0, "DOT") if random.random() < 0.4 else (1, "1")
+            elif window < 0.32:
+                if random.random() < 0.22:
+                    out = True
+                    result = random.choice(("EDGE", "BOWLED"))
+                else:
+                    runs, result = random.choice((0, 0, 1)), "SNICK"
+                    if runs == 1:
+                        result = "1"
+                    else:
+                        result = "DOT"
+            else:
+                if random.random() < 0.55:
+                    out = True
+                    result = random.choice(("BOWLED", "MISS"))
+                else:
+                    result = "DOT"
+
+        self.match.balls += 1
+        if out:
+            self.match.wickets += 1
+            self.match.combo = 0
+            self.match.last_result = result
+            self.match.over_runs.append("W")
+            self.chips.append(Chip("WICKET!", RED, 90))
+            self.play(self.sfx_bad)
+        else:
+            self.match.runs += runs
+            self.match.combo = self.match.combo + 1 if runs else 0
+            if runs == 4:
+                self.match.fours += 1
+            if runs == 6:
+                self.match.sixes += 1
+            label = {0: "DOT", 1: "1", 2: "2", 3: "3", 4: "FOUR!", 6: "SIX!!"}.get(runs, str(runs))
+            self.match.last_result = label
+            self.match.over_runs.append(str(runs) if runs else ".")
+            color = GOLD if runs >= 4 else (CYAN if runs else WHITE)
+            self.chips.append(Chip(label, color, 80))
+            self.play(self.sfx_six if runs == 6 else self.sfx_ok)
+
+        if len(self.match.over_runs) > 6:
+            self.match.over_runs = self.match.over_runs[-6:]
+
+        self.phase = "result"
+        self.phase_t = 0
+
+    def _end_match(self) -> None:
+        if self.user is not None:
+            auth.save_match(
+                self.user.id,
+                self.match.runs,
+                self.match.wickets,
+                self.match.balls,
+                self.match.fours,
+                self.match.sixes,
+            )
+            self.user = auth.get_user_by_id(self.user.id)
+        self.state = "RESULT"
+        self.play(self.sfx_six)
+
+    # --- drawing ---
+
+    def _draw(self) -> None:
+        if self.state == "TITLE":
+            self._draw_title()
+        elif self.state == "AUTH":
+            self._draw_auth()
+        elif self.state == "MENU":
+            self._draw_menu()
+        elif self.state == "RECORDS":
+            self._draw_records()
+        elif self.state == "PLAY":
+            self._draw_play()
+        elif self.state == "RESULT":
+            self._draw_result()
+        scanlines(self.canvas, 28)
+
+    def _sky_grass(self) -> None:
+        self.canvas.fill(SKY)
+        for i in range(40):
+            pygame.draw.rect(self.canvas, SKY2, (i * 8, 0, 4, 70))
+        pygame.draw.rect(self.canvas, GRASS2, (0, 70, W, H - 70))
+        dither_rect(self.canvas, pygame.Rect(0, 78, W, H - 78), GRASS, GRASS2)
+
+    def _crowd(self) -> None:
+        pygame.draw.rect(self.canvas, NAVY, (0, 52, W, 20))
+        for i, col in enumerate(self.crowd):
+            x = (i * 7) % W
+            y = 54 + (i * 3) % 14
+            self.canvas.fill(col, (x, y, 2, 3))
+
+    def _draw_title(self) -> None:
+        self._sky_grass()
+        self._crowd()
+        self._draw_pitch(offset=0)
+        self._draw_batsman(250, 108, swing=False)
+        self._draw_bowler(70, 92, run=self.title_tick % 20 < 10)
+        pygame.draw.rect(self.canvas, BLACK, (18, 8, 284, 42))
+        pygame.draw.rect(self.canvas, GOLD, (18, 8, 284, 42), 2)
+        blit_text_center(self.canvas, "8-BIT CRICKET", W // 2, 14, GOLD, 2)
+        blit_text_center(self.canvas, "RETRO TEST MATCH", W // 2, 34, CREAM, 1)
+        if (self.title_tick // 30) % 2 == 0:
+            blit_text_center(self.canvas, "PRESS ENTER", W // 2, 154, WHITE, 1)
+        blit_text_center(self.canvas, "ESC QUIT", W // 2, 168, GRAY, 1)
+
+    def _panel(self, x: int, y: int, w: int, h: int) -> None:
+        pygame.draw.rect(self.canvas, NAVY, (x, y, w, h))
+        pygame.draw.rect(self.canvas, GOLD, (x, y, w, h), 2)
+        pygame.draw.rect(self.canvas, WHITE, (x + 2, y + 2, w - 4, h - 4), 1)
+
+    def _draw_auth(self) -> None:
+        self.canvas.fill(NAVY)
+        for y in range(0, H, 4):
+            pygame.draw.rect(self.canvas, NAVY2, (0, y, W, 2))
+        blit_text_center(self.canvas, "PLAYER LOGIN", W // 2, 10, GOLD, 2)
+
+        tab_y = 36
+        for i, name in enumerate(("LOGIN", "SIGNUP")):
+            x = 70 + i * 90
+            on = self.auth_mode == name
+            col = GOLD if on else GRAY
+            blit_text(self.canvas, name, x, tab_y, col, 1)
+            if on:
+                pygame.draw.rect(self.canvas, GOLD, (x - 4, tab_y + 10, text_width(name), 2))
+
+        blit_text(self.canvas, "TAB TO SWITCH", 104, 50, GRAY, 1)
+
+        def field_box(label: str, value: str, active: bool, secret: bool, fy: int) -> None:
+            blit_text(self.canvas, label, 54, fy, CREAM, 1)
+            pygame.draw.rect(self.canvas, BLACK, (54, fy + 10, 212, 16))
+            pygame.draw.rect(self.canvas, GOLD if active else GRAY, (54, fy + 10, 212, 16), 1)
+            shown = ("*" * len(value)) if secret else value
+            if active and (self.cursor_blink // 20) % 2 == 0:
+                shown += "_"
+            blit_text(self.canvas, shown or " ", 58, fy + 13, WHITE, 1)
+
+        field_box("USERNAME", self.username, self.field == "username", False, 66)
+        field_box("PASSWORD", self.password, self.field == "password", True, 100)
+
+        blit_text_center(self.canvas, "ENTER TO CONFIRM", W // 2, 140, WHITE, 1)
+        if self.flash_timer > 0:
+            blit_text_center(self.canvas, self.flash, W // 2, 156, PINK, 1)
+        else:
+            hint = "NEW PLAYER? TAB SIGNUP" if self.auth_mode == "LOGIN" else "MIN 6 CHAR PASSWORD"
+            blit_text_center(self.canvas, hint, W // 2, 156, GRAY, 1)
+
+    def _draw_menu(self) -> None:
+        self._sky_grass()
+        self._crowd()
+        self._draw_pitch(0)
+        name = self.user.username.upper() if self.user else "GUEST"
+        high = self.user.high_score if self.user else 0
+        played = self.user.matches_played if self.user else 0
+
+        self._panel(16, 10, 288, 36)
+        blit_text(self.canvas, f"BATSMAN:{name}", 24, 16, WHITE, 1)
+        blit_text(self.canvas, f"BEST {high}  MATCHES {played}", 24, 28, CREAM, 1)
+
+        items = ["BAT NOW", "RECORDS", "LOG OUT"]
+        for i, item in enumerate(items):
+            y = 60 + i * 22
+            on = i == self.menu_index
+            pygame.draw.rect(self.canvas, NAVY if on else BLACK, (90, y, 140, 18))
+            pygame.draw.rect(self.canvas, GOLD if on else GRAY, (90, y, 140, 18), 1)
+            label = f"> {item}" if on else f"  {item}"
+            blit_text_center(self.canvas, label, W // 2, y + 5, GOLD if on else WHITE, 1)
+
+        blit_text_center(self.canvas, "ARROWS + ENTER", W // 2, 160, WHITE, 1)
+
+    def _draw_records(self) -> None:
+        self.canvas.fill(NAVY)
+        blit_text_center(self.canvas, "HALL OF FAME", W // 2, 8, GOLD, 2)
+        blit_text(self.canvas, "TOP SCORES", 16, 32, CREAM, 1)
+        if not self.board:
+            blit_text(self.canvas, "NO MATCHES YET", 16, 46, GRAY, 1)
+        for i, (name, score) in enumerate(self.board[:6]):
+            blit_text(self.canvas, f"{i+1}.{name[:10]:<10} {score}", 16, 46 + i * 10, WHITE, 1)
+
+        blit_text(self.canvas, "YOUR INNINGS", 176, 32, CREAM, 1)
+        if not self.records:
+            blit_text(self.canvas, "GO BAT!", 176, 46, GRAY, 1)
+        for i, rec in enumerate(self.records[:6]):
+            line = f"{rec['runs']}/{rec['wickets']}  {rec['sixes']}x6"
+            blit_text(self.canvas, line, 176, 46 + i * 10, WHITE, 1)
+        blit_text_center(self.canvas, "ENTER BACK", W // 2, 164, GOLD, 1)
+
+    def _draw_pitch(self, offset: int) -> None:
+        pygame.draw.rect(self.canvas, PITCH2, (70, 86, 180, 36))
+        pygame.draw.rect(self.canvas, PITCH, (76, 90, 168, 28))
+        pygame.draw.line(self.canvas, WHITE, (88, 90), (88, 118))
+        pygame.draw.line(self.canvas, WHITE, (232, 90), (232, 118))
+        # stumps
+        for sx in (84, 88, 92):
+            pygame.draw.rect(self.canvas, WOOD, (sx, 78, 2, 16))
+        pygame.draw.rect(self.canvas, GOLD, (84, 76, 10, 2))
+        for sx in (228, 232, 236):
+            pygame.draw.rect(self.canvas, WOOD, (sx, 78, 2, 16))
+        pygame.draw.rect(self.canvas, GOLD, (228, 76, 10, 2))
+
+    def _draw_bowler(self, x: int, y: int, run: bool) -> None:
+        pygame.draw.rect(self.canvas, RED, (x + 2, y + 6, 8, 10))  # jersey
+        pygame.draw.rect(self.canvas, SKIN, (x + 3, y, 6, 6))
+        pygame.draw.rect(self.canvas, BLACK, (x + 4, y + 1, 2, 2))
+        pygame.draw.rect(self.canvas, WHITE, (x + 2, y + 16, 4, 8))
+        pygame.draw.rect(self.canvas, WHITE, (x + 7, y + 16, 4, 8))
+        arm = -6 if run else 8
+        pygame.draw.rect(self.canvas, SKIN, (x + arm, y + 8, 6, 2))
+
+    def _draw_batsman(self, x: int, y: int, swing: bool) -> None:
+        pygame.draw.rect(self.canvas, BLUE, (x, y + 6, 10, 12))
+        pygame.draw.rect(self.canvas, SKIN, (x + 2, y, 6, 6))
+        pygame.draw.rect(self.canvas, WHITE, (x + 6, y - 2, 6, 3))  # helmet
+        pygame.draw.rect(self.canvas, WHITE, (x, y + 18, 4, 8))
+        pygame.draw.rect(self.canvas, WHITE, (x + 6, y + 18, 4, 8))
+        if swing:
+            pygame.draw.line(self.canvas, WOOD, (x + 10, y + 8), (x + 22, y - 4), 3)
+        else:
+            pygame.draw.line(self.canvas, WOOD, (x + 10, y + 10), (x + 16, y + 24), 3)
+
+    def _draw_play(self) -> None:
+        self._sky_grass()
+        self._crowd()
+        self._draw_pitch(0)
+
+        run = self.phase == "runup"
+        self._draw_bowler(int(self.bowler_x), 92, run)
+        swinging = self.phase == "result" and self.swung and self.phase_t < 20
+        self._draw_batsman(246, 100, swinging)
+
+        if self.phase in ("runup", "ball", "result"):
+            mx, my = int(self.land_x), int(self.land_y)
+            pygame.draw.rect(self.canvas, DARK_RED, (mx - 3, my - 1, 7, 3))
+            pygame.draw.rect(self.canvas, RED, (mx - 1, my - 2, 3, 5))
+        if self.phase == "ball":
+            bx, by = int(self.ball_x), int(self.ball_y - self.ball_z)
+            pygame.draw.rect(self.canvas, BLACK, (bx + 1, int(self.ball_y) + 6, 4, 2))
+            pygame.draw.rect(self.canvas, RED, (bx, by, 4, 4))
+            pygame.draw.rect(self.canvas, WHITE, (bx + 1, by + 1, 1, 1))
+
+        # HUD
+        pygame.draw.rect(self.canvas, BLACK, (0, 0, W, 22))
+        m = self.match
+        name = self.user.username.upper()[:8] if self.user else "PLAYER"
+        blit_text(self.canvas, f"{name} {m.runs}/{m.wickets}", 4, 4, WHITE, 1)
+        blit_text(self.canvas, f"OVR {m.overs_text}/{MAX_OVERS}", 140, 4, CREAM, 1)
+        blit_text(self.canvas, f"4s {m.fours}  6s {m.sixes}", 230, 4, GOLD, 1)
+
+        pygame.draw.rect(self.canvas, BLACK, (0, 158, W, 22))
+        this_over = " ".join(m.over_runs[-6:] or ["-"])
+        blit_text(self.canvas, f"OVER {this_over}", 4, 162, WHITE, 1)
+        blit_text(self.canvas, f"SHOT:{self.shot}", 170, 162, CYAN, 1)
+
+        if self.phase == "idle":
+            blit_text_center(self.canvas, "SPACE TO FACE  LEFT/RIGHT SHOT", W // 2, 28, WHITE, 1)
+        elif self.phase == "ball":
+            # timing meter
+            pygame.draw.rect(self.canvas, BLACK, (90, 26, 140, 10))
+            pygame.draw.rect(self.canvas, WHITE, (90, 26, 140, 10), 1)
+            gold_x = max(90, min(214, 90 + int(self.sweet_spot * 136) - 8))
+            pygame.draw.rect(self.canvas, GOLD, (gold_x, 26, 16, 10))
+            pygame.draw.rect(self.canvas, RED, (90 + int(self.timing * 136), 26, 4, 10))
+            blit_text_center(self.canvas, "TIME YOUR SWING!", W // 2, 40, CREAM, 1)
+        elif self.phase == "runup":
+            blit_text_center(self.canvas, self.ball_kind, W // 2, 28, PINK, 1)
+
+        for chip in self.chips:
+            blit_text_center(self.canvas, chip.text, W // 2, int(chip.y), chip.color, 2)
+
+    def _draw_result(self) -> None:
+        self._sky_grass()
+        self._panel(40, 24, 240, 120)
+        blit_text_center(self.canvas, "INNINGS OVER", W // 2, 32, GOLD, 2)
+        m = self.match
+        blit_text_center(self.canvas, f"{m.runs} RUNS", W // 2, 56, WHITE, 2)
+        blit_text_center(
+            self.canvas,
+            f"{m.wickets} DOWN   {m.overs_text} OVERS",
+            W // 2,
+            80,
+            CREAM,
+            1,
+        )
+        blit_text_center(self.canvas, f"{m.fours} FOURS   {m.sixes} SIXES", W // 2, 96, CYAN, 1)
+        if self.user:
+            blit_text_center(self.canvas, f"SAVED TO {self.user.username.upper()}", W // 2, 112, PINK, 1)
+        blit_text_center(self.canvas, "ENTER FOR MENU", W // 2, 128, WHITE, 1)
+
+
+def main() -> None:
+    CricketGame().run()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pygame.quit()
+        raise
