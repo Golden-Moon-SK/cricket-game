@@ -1,29 +1,14 @@
-# 8-Bit Cricket
+# 8-Bit Cricket: Your Favourite Game -- in Retro!
 
-Retro arcade cricket with real local accounts.
+## Features of the Game!
 
-## Run
+- Bat against different types of balls!
+- Score different types of shots!
+- Keep making runs!
 
-```bash
-python3 -m pip install -r requirements.txt
-python3 main.py
-```
+## Really Cool Feature!: Records
 
-## Play
+- All your scores, stored in one place.
+- View your scores and analytics!
 
-- **Sign up / log in** — usernames and salted PBKDF2 password hashes are stored in `users.db` (not plain text).
-- **Bat now** — 5 overs or 3 wickets.
-- **Left / Right** — pick DEFEND, DRIVE, or LOFT.
-- **Space** — start the over, then swing when the red needle hits the gold window.
-- **Esc** — back / quit.
-
-Scores are saved to your account. Records shows your innings and a high-score board.
-
-## Project layout
-
-```text
-main.py          # Pygame game client
-pixel.py         # Rendering helpers
-auth.py          # Authentication and game-record logic
-schema.sql       # SQLite database schema
-```
+### Keep Track of Future Updates! Check DevLog for more info ###
