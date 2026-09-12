@@ -41,6 +41,7 @@ MAX_OVERS = 5
 MAX_WICKETS = 3
 MAX_ENERGY = 100
 SHOT_ENERGY_COST = {"DEFEND": 0, "DRIVE": 8, "LOFT": 15}
+REPEAT_SHOT_FATIGUE = {"DRIVE": 4, "LOFT": 6}
 
 
 @dataclass
@@ -54,6 +55,11 @@ class Match:
     combo: int = 0
     over_runs: list[str] = field(default_factory=list)
     energy: int = MAX_ENERGY
+    shot_uses: dict[str, int] = field(
+        default_factory=lambda: {"DRIVE": 0, "LOFT": 0}
+    )
+    target_runs: int = 0
+    target_balls: int = MAX_OVERS * 6
 
     @property
     def overs_text(self) -> str:
@@ -61,7 +67,15 @@ class Match:
 
     @property
     def finished(self) -> bool:
-        return self.wickets >= MAX_WICKETS or self.balls >= MAX_OVERS * 6
+        return (
+            self.runs >= self.target_runs
+            or self.wickets >= MAX_WICKETS
+            or self.balls >= self.target_balls
+        )
+
+    @property
+    def won(self) -> bool:
+        return self.runs >= self.target_runs
 
 
 class Chip:
@@ -185,7 +199,7 @@ class CricketGame:
             self.state = "MENU" if self.state == "RECORDS" else "AUTH"
             if self.state == "AUTH":
                 self.user = None
-        elif self.state in ("PLAY", "RESULT"):
+        elif self.state in ("TARGET", "PLAY", "RESULT"):
             self.state = "MENU"
 
     def _update(self, events: list[pygame.event.Event], dt: int) -> None:
@@ -203,6 +217,8 @@ class CricketGame:
             self._records_input(events)
         elif self.state == "ACCOUNTS":
             self._accounts_input(events)
+        elif self.state == "TARGET":
+            self._target_input(events)
         elif self.state == "PLAY":
             self._play_update(events)
         elif self.state == "RESULT":
@@ -373,14 +389,26 @@ class CricketGame:
                 self.state = "MENU"
                 self.play(self.sfx_ok)
 
+    def _target_input(self, events: list[pygame.event.Event]) -> None:
+        for e in events:
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.state = "PLAY"
+                self.play(self.sfx_ok)
+
     def _start_match(self) -> None:
-        self.match = Match()
+        # Keep targets around 1.1–1.5 runs per ball: challenging but realistic
+        # with well-timed drives and lofted shots, without requiring perfection.
+        target_balls = random.choice((18, 20, 22, 24))
+        target_runs = random.randint(
+            math.ceil(target_balls * 1.1), math.floor(target_balls * 1.5)
+        )
+        self.match = Match(target_runs=target_runs, target_balls=target_balls)
         self.phase = "idle"
         self.phase_t = 0
         self.chips.clear()
         self.shot_index = 1
         self.shot = "DRIVE"
-        self.state = "PLAY"
+        self.state = "TARGET"
         self.play(self.sfx_ok)
 
     def _play_update(self, events: list[pygame.event.Event]) -> None:
@@ -489,6 +517,12 @@ class CricketGame:
         self.swung = True
         self._resolve_shot(missed=False)
 
+    def _shot_energy_cost(self, shot: str) -> int:
+        """Return the cost of using this attacking shot next in the innings."""
+        return SHOT_ENERGY_COST[shot] + (
+            self.match.shot_uses.get(shot, 0) * REPEAT_SHOT_FATIGUE.get(shot, 0)
+        )
+
     def _resolve_shot(self, missed: bool) -> None:
         window = abs(self.timing - self.sweet_spot)
         shot = self.shot
@@ -506,11 +540,12 @@ class CricketGame:
         elif shot == "DEFEND":
             # A defensive block is safe and free, but can never add to the score.
             result = "DEFEND"
-        elif self.match.energy < SHOT_ENERGY_COST[shot]:
+        elif self.match.energy < self._shot_energy_cost(shot):
             # The delivery still counts; choose DEFEND to safely see it out.
             result = "TIRED"
         else:
-            self.match.energy -= SHOT_ENERGY_COST[shot]
+            self.match.energy -= self._shot_energy_cost(shot)
+            self.match.shot_uses[shot] += 1
             if window < 0.08:
                 if shot == "LOFT":
                     if random.random() < 0.78:
@@ -613,6 +648,8 @@ class CricketGame:
             self._draw_records()
         elif self.state == "ACCOUNTS":
             self._draw_accounts()
+        elif self.state == "TARGET":
+            self._draw_target()
         elif self.state == "PLAY":
             self._draw_play()
         elif self.state == "RESULT":
@@ -801,6 +838,20 @@ class CricketGame:
         else:
             pygame.draw.line(self.canvas, WOOD, (x + 10, y + 10), (x + 16, y + 24), 3)
 
+    def _draw_target(self) -> None:
+        self._sky_grass()
+        self._crowd()
+        self._draw_pitch(0)
+        self._draw_bowler(40, 92, False)
+        self._draw_batsman(246, 100, False)
+        self._panel(38, 30, 244, 112)
+        m = self.match
+        overs = f"{m.target_balls // 6}.{m.target_balls % 6}"
+        blit_text_center(self.canvas, "CHASE TARGET", W // 2, 40, GOLD, 2)
+        blit_text_center(self.canvas, f"SCORE {m.target_runs} RUNS", W // 2, 68, WHITE, 2)
+        blit_text_center(self.canvas, f"IN {m.target_balls} BALLS ({overs} OVERS)", W // 2, 88, CREAM, 1)
+        blit_text_center(self.canvas, "ENTER TO BAT", W // 2, 118, CYAN, 1)
+
     def _draw_play(self) -> None:
         self._sky_grass()
         self._crowd()
@@ -826,7 +877,7 @@ class CricketGame:
         m = self.match
         name = self.user.username.upper()[:8] if self.user else "PLAYER"
         blit_text(self.canvas, f"{name} {m.runs}/{m.wickets}", 4, 4, WHITE, 1)
-        blit_text(self.canvas, f"OVR {m.overs_text}/{MAX_OVERS}", 140, 4, CREAM, 1)
+        blit_text(self.canvas, f"TGT {m.target_runs} IN {m.target_balls - m.balls}", 126, 4, CREAM, 1)
         blit_text(self.canvas, f"4s {m.fours}  6s {m.sixes}", 230, 4, GOLD, 1)
 
         pygame.draw.rect(self.canvas, BLACK, (0, 158, W, 22))
@@ -834,8 +885,8 @@ class CricketGame:
         blit_text(self.canvas, f"O:{this_over}", 112, 162, WHITE, 1)
         blit_text(self.canvas, f"SHOT:{self.shot}", 196, 162, CYAN, 1)
 
-        # Batter stamina: defensive shots are free, while attacking shots drain it.
-        bar_x, bar_y, bar_w, bar_h = 4, 169, 82, 7
+        # Repeating an attacking shot builds fatigue, so changing shots matters.
+        bar_x, bar_y, bar_w, bar_h = 4, 169, 70, 7
         energy_ratio = m.energy / MAX_ENERGY
         energy_color = GRASS if energy_ratio > 0.5 else (GOLD if energy_ratio > 0.25 else RED)
         blit_text(self.canvas, "ENG", bar_x, 160, CREAM, 1)
@@ -845,6 +896,9 @@ class CricketGame:
         if fill_width:
             pygame.draw.rect(self.canvas, energy_color, (bar_x + 1, bar_y + 1, fill_width, bar_h - 2))
         blit_text(self.canvas, str(m.energy), bar_x + bar_w + 4, 169, energy_color, 1)
+        drive_cost = self._shot_energy_cost("DRIVE")
+        loft_cost = self._shot_energy_cost("LOFT")
+        blit_text(self.canvas, f"D{drive_cost} L{loft_cost}", 112, 169, CREAM, 1)
 
         if self.phase == "idle":
             blit_text_center(self.canvas, "SPACE TO FACE  LEFT/RIGHT SHOT", W // 2, 28, WHITE, 1)
@@ -865,8 +919,10 @@ class CricketGame:
     def _draw_result(self) -> None:
         self._sky_grass()
         self._panel(40, 24, 240, 120)
-        blit_text_center(self.canvas, "INNINGS OVER", W // 2, 32, GOLD, 2)
         m = self.match
+        result = "TARGET CHASED!" if m.won else "INNINGS OVER"
+        result_color = GOLD if m.won else RED
+        blit_text_center(self.canvas, result, W // 2, 32, result_color, 2)
         blit_text_center(self.canvas, f"{m.runs} RUNS", W // 2, 56, WHITE, 2)
         blit_text_center(
             self.canvas,
@@ -876,10 +932,12 @@ class CricketGame:
             CREAM,
             1,
         )
-        blit_text_center(self.canvas, f"{m.fours} FOURS   {m.sixes} SIXES", W // 2, 96, CYAN, 1)
+        target_status = "TARGET MET" if m.won else f"TARGET {m.target_runs}"
+        blit_text_center(self.canvas, target_status, W // 2, 96, GOLD if m.won else PINK, 1)
+        blit_text_center(self.canvas, f"{m.fours} FOURS   {m.sixes} SIXES", W // 2, 108, CYAN, 1)
         if self.user:
-            blit_text_center(self.canvas, f"SAVED TO {self.user.username.upper()}", W // 2, 112, PINK, 1)
-        blit_text_center(self.canvas, "ENTER FOR MENU", W // 2, 128, WHITE, 1)
+            blit_text_center(self.canvas, f"SAVED TO {self.user.username.upper()}", W // 2, 122, PINK, 1)
+        blit_text_center(self.canvas, "ENTER FOR MENU", W // 2, 134, WHITE, 1)
 
 
 def main() -> None:

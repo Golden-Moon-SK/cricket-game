@@ -17,10 +17,10 @@
 
 - **Sign up / log in** — usernames and salted PBKDF2 password hashes are stored in `users.db` (not plain text).
 - **Log out / switch player** — opens a local account picker that shows saved usernames only; selecting one still requires that account's password.
-- **Bat now** — 5 overs or 3 wickets.
+- **Bat now** — each innings opens with a fresh target: chase a balanced random score within its stated ball limit, before losing 3 wickets.
 - **Left / Right** — pick DEFEND, DRIVE, or LOFT.
 - **Space** — start the over, then swing when the red needle hits the gold window.
-- **Energy** — the bottom-left bar tracks the batter's stamina. DEFEND costs no energy and always scores 0; DRIVE costs 8 energy; LOFT costs 15 energy but has the best chance of boundaries. Attacking shots cannot be played without enough energy.
+- **Energy** — the bottom-left bar tracks the batter's stamina. DEFEND costs no energy and always scores 0. DRIVE starts at 8 energy and LOFT at 15, then each repeat in an innings costs progressively more (shown as `D` and `L` beside the bar), so repeatedly relying on either shot quickly tires the batter.
 - **Esc** — back / quit.
 
 ## This is an unfinished version! It is under production! ##
