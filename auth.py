@@ -131,6 +131,19 @@ def get_user_by_id(user_id: int) -> User | None:
     )
 
 
+def local_usernames() -> list[str]:
+    """List account names created in this local game database.
+
+    Password hashes and salts are deliberately not selected, so account-picker
+    callers only ever receive public usernames.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT username FROM users ORDER BY username COLLATE NOCASE"
+        ).fetchall()
+    return [str(row["username"]) for row in rows]
+
+
 def save_match(
     user_id: int,
     runs: int,
@@ -150,17 +163,25 @@ def save_match(
         )
 
 
-def recent_matches(user_id: int, limit: int = 8) -> list[dict]:
+def recent_matches(user_id: int, limit: int | None = None) -> list[dict]:
+    """Return a player's completed innings, newest first.
+
+    ``matches`` is the source of truth for the Records screen.  A limit remains
+    available for callers that need a compact recent-history list, while the
+    game can request the full scorecard history.
+    """
+    limit_clause = "" if limit is None else "LIMIT ?"
+    params: tuple[int, ...] = (user_id,) if limit is None else (user_id, limit)
     with _connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT runs, wickets, balls, fours, sixes, played_at
             FROM matches
             WHERE user_id = ?
             ORDER BY id DESC
-            LIMIT ?
+            {limit_clause}
             """,
-            (user_id, limit),
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 

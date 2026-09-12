@@ -39,6 +39,8 @@ GRAY = (72, 80, 104)
 
 MAX_OVERS = 5
 MAX_WICKETS = 3
+MAX_ENERGY = 100
+SHOT_ENERGY_COST = {"DEFEND": 0, "DRIVE": 8, "LOFT": 15}
 
 
 @dataclass
@@ -51,6 +53,7 @@ class Match:
     last_result: str = "PLAY"
     combo: int = 0
     over_runs: list[str] = field(default_factory=list)
+    energy: int = MAX_ENERGY
 
     @property
     def overs_text(self) -> str:
@@ -124,6 +127,9 @@ class CricketGame:
         self.crowd = [random.choice((PINK, CYAN, GOLD, WHITE, RED)) for _ in range(180)]
         self.records: list[dict] = []
         self.board: list[tuple[str, int]] = []
+        self.records_page = 0
+        self.local_accounts: list[str] = []
+        self.account_index = 0
 
         auth.init_db()
         self._beep_init()
@@ -175,7 +181,7 @@ class CricketGame:
             self.running = False
         elif self.state in ("AUTH",):
             self.state = "TITLE"
-        elif self.state in ("MENU", "RECORDS"):
+        elif self.state in ("MENU", "RECORDS", "ACCOUNTS"):
             self.state = "MENU" if self.state == "RECORDS" else "AUTH"
             if self.state == "AUTH":
                 self.user = None
@@ -195,6 +201,8 @@ class CricketGame:
             self._menu_input(events)
         elif self.state == "RECORDS":
             self._records_input(events)
+        elif self.state == "ACCOUNTS":
+            self._accounts_input(events)
         elif self.state == "PLAY":
             self._play_update(events)
         elif self.state == "RESULT":
@@ -257,6 +265,14 @@ class CricketGame:
     def _menu_input(self, events: list[pygame.event.Event]) -> None:
         items = ["BAT NOW", "RECORDS", "LOG OUT"]
         for e in events:
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                mx, my = (coord // SCALE for coord in e.pos)
+                for i, _item in enumerate(items):
+                    if pygame.Rect(90, 60 + i * 22, 140, 18).collidepoint(mx, my):
+                        self.menu_index = i
+                        self._choose_menu_item(items[i])
+                        break
+                continue
             if e.type != pygame.KEYDOWN:
                 continue
             if e.key in (pygame.K_UP, pygame.K_w):
@@ -266,25 +282,90 @@ class CricketGame:
                 self.menu_index = (self.menu_index + 1) % len(items)
                 self.play(self.sfx_bowl)
             elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
-                choice = items[self.menu_index]
-                if choice == "BAT NOW":
-                    self._start_match()
-                elif choice == "RECORDS":
-                    assert self.user is not None
-                    self.user = auth.get_user_by_id(self.user.id)
-                    self.records = auth.recent_matches(self.user.id) if self.user else []
-                    self.board = auth.leaderboard()
-                    self.state = "RECORDS"
-                    self.play(self.sfx_ok)
-                else:
-                    self.user = None
-                    self.state = "AUTH"
-                    self.play(self.sfx_bad)
+                self._choose_menu_item(items[self.menu_index])
+
+    def _choose_menu_item(self, choice: str) -> None:
+        if choice == "BAT NOW":
+            self._start_match()
+        elif choice == "RECORDS":
+            assert self.user is not None
+            self.user = auth.get_user_by_id(self.user.id)
+            self.records = auth.recent_matches(self.user.id) if self.user else []
+            self.board = auth.leaderboard()
+            self.records_page = 0
+            self.state = "RECORDS"
+            self.play(self.sfx_ok)
+        else:
+            self._open_account_picker()
+            self.play(self.sfx_bad)
+
+    def _open_account_picker(self) -> None:
+        self.user = None
+        self.local_accounts = auth.local_usernames()
+        self.account_index = 0
+        self.state = "ACCOUNTS"
+
+    def _accounts_input(self, events: list[pygame.event.Event]) -> None:
+        total_choices = len(self.local_accounts) + 1  # final item starts signup
+        for e in events:
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                mx, my = (coord // SCALE for coord in e.pos)
+                visible_start = max(0, min(self.account_index - 3, max(0, len(self.local_accounts) - 7)))
+                for row, _name in enumerate(self.local_accounts[visible_start : visible_start + 7]):
+                    if pygame.Rect(42, 48 + row * 13, 236, 11).collidepoint(mx, my):
+                        self.account_index = visible_start + row
+                        self._select_account()
+                        break
+                if pygame.Rect(42, 142, 236, 14).collidepoint(mx, my):
+                    self.account_index = len(self.local_accounts)
+                    self._select_account()
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_UP, pygame.K_w):
+                self.account_index = (self.account_index - 1) % total_choices
+                self.play(self.sfx_bowl)
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_DOWN, pygame.K_s):
+                self.account_index = (self.account_index + 1) % total_choices
+                self.play(self.sfx_bowl)
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self._select_account()
+
+    def _select_account(self) -> None:
+        if self.account_index == len(self.local_accounts):
+            self.auth_mode = "SIGNUP"
+            self.username = ""
+            self.password = ""
+            self.field = "username"
+        else:
+            self.auth_mode = "LOGIN"
+            self.username = self.local_accounts[self.account_index]
+            self.password = ""
+            self.field = "password"
+        self.state = "AUTH"
+        self.play(self.sfx_ok)
 
     def _records_input(self, events: list[pygame.event.Event]) -> None:
         for e in events:
-            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                mx, my = (coord // SCALE for coord in e.pos)
+                if pygame.Rect(12, 150, 90, 18).collidepoint(mx, my):
+                    self._change_records_page(-1)
+                elif pygame.Rect(218, 150, 90, 18).collidepoint(mx, my):
+                    self._change_records_page(1)
+                elif pygame.Rect(110, 150, 100, 18).collidepoint(mx, my):
+                    self.state = "MENU"
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_LEFT, pygame.K_a):
+                self._change_records_page(-1)
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_RIGHT, pygame.K_d):
+                self._change_records_page(1)
+            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
                 self.state = "MENU"
+
+    def _change_records_page(self, direction: int) -> None:
+        per_page = 7
+        page_count = max(1, math.ceil(len(self.records) / per_page))
+        next_page = self.records_page + direction
+        if 0 <= next_page < page_count:
+            self.records_page = next_page
+            self.play(self.sfx_bowl)
 
     def _result_input(self, events: list[pygame.event.Event]) -> None:
         for e in events:
@@ -422,7 +503,14 @@ class CricketGame:
                 result = random.choice(("BOWLED", "LBW"))
             else:
                 result = "DOT"
+        elif shot == "DEFEND":
+            # A defensive block is safe and free, but can never add to the score.
+            result = "DEFEND"
+        elif self.match.energy < SHOT_ENERGY_COST[shot]:
+            # The delivery still counts; choose DEFEND to safely see it out.
+            result = "TIRED"
         else:
+            self.match.energy -= SHOT_ENERGY_COST[shot]
             if window < 0.08:
                 if shot == "LOFT":
                     if random.random() < 0.78:
@@ -481,7 +569,11 @@ class CricketGame:
                 self.match.fours += 1
             if runs == 6:
                 self.match.sixes += 1
-            label = {0: "DOT", 1: "1", 2: "2", 3: "3", 4: "FOUR!", 6: "SIX!!"}.get(runs, str(runs))
+            label = (
+                result
+                if result in ("DEFEND", "TIRED")
+                else {0: "DOT", 1: "1", 2: "2", 3: "3", 4: "FOUR!", 6: "SIX!!"}.get(runs, str(runs))
+            )
             self.match.last_result = label
             self.match.over_runs.append(str(runs) if runs else ".")
             color = GOLD if runs >= 4 else (CYAN if runs else WHITE)
@@ -519,6 +611,8 @@ class CricketGame:
             self._draw_menu()
         elif self.state == "RECORDS":
             self._draw_records()
+        elif self.state == "ACCOUNTS":
+            self._draw_accounts()
         elif self.state == "PLAY":
             self._draw_play()
         elif self.state == "RESULT":
@@ -619,20 +713,60 @@ class CricketGame:
 
     def _draw_records(self) -> None:
         self.canvas.fill(NAVY)
-        blit_text_center(self.canvas, "HALL OF FAME", W // 2, 8, GOLD, 2)
-        blit_text(self.canvas, "TOP SCORES", 16, 32, CREAM, 1)
-        if not self.board:
-            blit_text(self.canvas, "NO MATCHES YET", 16, 46, GRAY, 1)
-        for i, (name, score) in enumerate(self.board[:6]):
-            blit_text(self.canvas, f"{i+1}.{name[:10]:<10} {score}", 16, 46 + i * 10, WHITE, 1)
-
-        blit_text(self.canvas, "YOUR INNINGS", 176, 32, CREAM, 1)
+        for y in range(0, H, 4):
+            pygame.draw.rect(self.canvas, NAVY2, (0, y, W, 2))
+        self._panel(8, 6, 304, 140)
+        blit_text_center(self.canvas, "MATCH RECORDS", W // 2, 12, GOLD, 2)
+        name = self.user.username.upper() if self.user else "PLAYER"
+        best = self.user.high_score if self.user else 0
+        blit_text(self.canvas, f"{name[:12]}  BEST:{best}", 16, 34, CREAM, 1)
+        blit_text(self.canvas, "#  SCORE  OVERS  4S 6S", 16, 48, CYAN, 1)
+        pygame.draw.line(self.canvas, GRAY, (16, 58), (304, 58))
         if not self.records:
-            blit_text(self.canvas, "GO BAT!", 176, 46, GRAY, 1)
-        for i, rec in enumerate(self.records[:6]):
-            line = f"{rec['runs']}/{rec['wickets']}  {rec['sixes']}x6"
-            blit_text(self.canvas, line, 176, 46 + i * 10, WHITE, 1)
-        blit_text_center(self.canvas, "ENTER BACK", W // 2, 164, GOLD, 1)
+            blit_text_center(self.canvas, "NO SCORES YET - GO BAT!", W // 2, 88, GRAY, 1)
+        per_page = 7
+        start = self.records_page * per_page
+        for i, rec in enumerate(self.records[start : start + per_page]):
+            match_no = len(self.records) - (start + i)
+            overs = f"{rec['balls'] // 6}.{rec['balls'] % 6}"
+            line = f"{match_no:<2} {rec['runs']}/{rec['wickets']:<2}  {overs:<4}  {rec['fours']:<2} {rec['sixes']:<2}"
+            blit_text(self.canvas, line, 16, 64 + i * 11, WHITE, 1)
+        page_count = max(1, math.ceil(len(self.records) / per_page))
+        blit_text_center(self.canvas, f"PAGE {self.records_page + 1}/{page_count}", W // 2, 132, GOLD, 1)
+        self._record_button("PREV", 12, self.records_page > 0)
+        self._record_button("BACK", 110, True)
+        self._record_button("NEXT", 218, self.records_page + 1 < page_count)
+
+    def _record_button(self, label: str, x: int, enabled: bool) -> None:
+        color = GOLD if enabled else GRAY
+        pygame.draw.rect(self.canvas, BLACK, (x, 150, 90, 18))
+        pygame.draw.rect(self.canvas, color, (x, 150, 90, 18), 1)
+        blit_text_center(self.canvas, label, x + 45, 155, color, 1)
+
+    def _draw_accounts(self) -> None:
+        self.canvas.fill(NAVY)
+        for y in range(0, H, 4):
+            pygame.draw.rect(self.canvas, NAVY2, (0, y, W, 2))
+        self._panel(24, 8, 272, 154)
+        blit_text_center(self.canvas, "LOCAL ACCOUNTS", W // 2, 16, GOLD, 2)
+        blit_text_center(self.canvas, "CHOOSE A USERNAME", W // 2, 34, CREAM, 1)
+
+        if not self.local_accounts:
+            blit_text_center(self.canvas, "NO ACCOUNTS SAVED", W // 2, 76, GRAY, 1)
+        visible_start = max(0, min(self.account_index - 3, max(0, len(self.local_accounts) - 7)))
+        for row, name in enumerate(self.local_accounts[visible_start : visible_start + 7]):
+            index = visible_start + row
+            y = 48 + row * 13
+            selected = index == self.account_index
+            pygame.draw.rect(self.canvas, BLACK if selected else NAVY2, (42, y, 236, 11))
+            pygame.draw.rect(self.canvas, GOLD if selected else GRAY, (42, y, 236, 11), 1)
+            blit_text(self.canvas, name[:16], 52, y + 2, GOLD if selected else WHITE, 1)
+
+        new_selected = self.account_index == len(self.local_accounts)
+        pygame.draw.rect(self.canvas, BLACK if new_selected else NAVY2, (42, 142, 236, 14))
+        pygame.draw.rect(self.canvas, GOLD if new_selected else GRAY, (42, 142, 236, 14), 1)
+        blit_text_center(self.canvas, "NEW PLAYER", W // 2, 146, GOLD if new_selected else WHITE, 1)
+        blit_text_center(self.canvas, "ENTER  PASSWORD REQUIRED", W // 2, 166, GRAY, 1)
 
     def _draw_pitch(self, offset: int) -> None:
         pygame.draw.rect(self.canvas, PITCH2, (70, 86, 180, 36))
@@ -697,8 +831,20 @@ class CricketGame:
 
         pygame.draw.rect(self.canvas, BLACK, (0, 158, W, 22))
         this_over = " ".join(m.over_runs[-6:] or ["-"])
-        blit_text(self.canvas, f"OVER {this_over}", 4, 162, WHITE, 1)
-        blit_text(self.canvas, f"SHOT:{self.shot}", 170, 162, CYAN, 1)
+        blit_text(self.canvas, f"O:{this_over}", 112, 162, WHITE, 1)
+        blit_text(self.canvas, f"SHOT:{self.shot}", 196, 162, CYAN, 1)
+
+        # Batter stamina: defensive shots are free, while attacking shots drain it.
+        bar_x, bar_y, bar_w, bar_h = 4, 169, 82, 7
+        energy_ratio = m.energy / MAX_ENERGY
+        energy_color = GRASS if energy_ratio > 0.5 else (GOLD if energy_ratio > 0.25 else RED)
+        blit_text(self.canvas, "ENG", bar_x, 160, CREAM, 1)
+        pygame.draw.rect(self.canvas, WHITE, (bar_x, bar_y, bar_w, bar_h), 1)
+        pygame.draw.rect(self.canvas, BLACK, (bar_x + 1, bar_y + 1, bar_w - 2, bar_h - 2))
+        fill_width = int((bar_w - 2) * energy_ratio)
+        if fill_width:
+            pygame.draw.rect(self.canvas, energy_color, (bar_x + 1, bar_y + 1, fill_width, bar_h - 2))
+        blit_text(self.canvas, str(m.energy), bar_x + bar_w + 4, 169, energy_color, 1)
 
         if self.phase == "idle":
             blit_text_center(self.canvas, "SPACE TO FACE  LEFT/RIGHT SHOT", W // 2, 28, WHITE, 1)
