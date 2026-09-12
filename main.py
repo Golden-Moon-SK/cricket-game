@@ -79,12 +79,14 @@ class Match:
 
 
 class Chip:
-    def __init__(self, text: str, color: tuple[int, int, int], life: int = 70) -> None:
+    def __init__(
+        self, text: str, color: tuple[int, int, int], life: int = 70, y: float = 70.0
+    ) -> None:
         self.text = text
         self.color = color
         self.life = life
         self.max_life = life
-        self.y = 70
+        self.y = y
 
     def tick(self) -> None:
         self.life -= 1
@@ -142,6 +144,11 @@ class CricketGame:
         self.records: list[dict] = []
         self.board: list[tuple[str, int]] = []
         self.records_page = 0
+        self.records_tab = "MATCHES"
+        self.pause_index = 0
+        self.result_index = 0
+        self.muted = False
+        self.fullscreen = False
         self.local_accounts: list[str] = []
         self.account_index = 0
 
@@ -167,7 +174,7 @@ class CricketGame:
         return pygame.mixer.Sound(buffer=bytes(buf))
 
     def play(self, snd: pygame.mixer.Sound | None) -> None:
-        if snd is not None:
+        if not self.muted and snd is not None:
             snd.play()
 
     def set_flash(self, msg: str, frames: int = 160) -> None:
@@ -183,6 +190,14 @@ class CricketGame:
                     self.running = False
                 elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                     self._escape()
+                elif e.type == pygame.KEYDOWN and self.state != "AUTH":
+                    if e.key == pygame.K_m:
+                        self.muted = not self.muted
+                        self.set_flash("SOUND OFF" if self.muted else "SOUND ON", 90)
+                    elif e.key in (pygame.K_f, pygame.K_F11):
+                        self.fullscreen = not self.fullscreen
+                        flags = pygame.FULLSCREEN if self.fullscreen else 0
+                        self.window = pygame.display.set_mode((W * SCALE, H * SCALE), flags)
             self._update(events, dt)
             self._draw()
             scaled = pygame.transform.scale(self.canvas, (W * SCALE, H * SCALE))
@@ -199,7 +214,14 @@ class CricketGame:
             self.state = "MENU" if self.state == "RECORDS" else "AUTH"
             if self.state == "AUTH":
                 self.user = None
-        elif self.state in ("TARGET", "PLAY", "RESULT"):
+        elif self.state == "PLAY":
+            self.state = "PAUSE"
+            self.pause_index = 0
+            self.play(self.sfx_bowl)
+        elif self.state == "PAUSE":
+            self.state = "PLAY"
+            self.play(self.sfx_bowl)
+        elif self.state in ("TARGET", "RESULT"):
             self.state = "MENU"
 
     def _update(self, events: list[pygame.event.Event], dt: int) -> None:
@@ -221,8 +243,39 @@ class CricketGame:
             self._target_input(events)
         elif self.state == "PLAY":
             self._play_update(events)
+        elif self.state == "PAUSE":
+            self._pause_input(events)
         elif self.state == "RESULT":
             self._result_input(events)
+
+    def _pause_input(self, events: list[pygame.event.Event]) -> None:
+        items = ["RESUME", "QUIT TO MENU"]
+        for e in events:
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                mx, my = (coord // SCALE for coord in e.pos)
+                for i in range(len(items)):
+                    y = 74 + i * 22
+                    if pygame.Rect(95, y, 130, 18).collidepoint(mx, my):
+                        self.pause_index = i
+                        self._confirm_pause_choice()
+                        break
+            elif e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_UP, pygame.K_w):
+                    self.pause_index = (self.pause_index - 1) % len(items)
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_DOWN, pygame.K_s):
+                    self.pause_index = (self.pause_index + 1) % len(items)
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    self._confirm_pause_choice()
+
+    def _confirm_pause_choice(self) -> None:
+        if self.pause_index == 0:
+            self.state = "PLAY"
+            self.play(self.sfx_ok)
+        else:
+            self.state = "MENU"
+            self.play(self.sfx_bad)
 
     def _title_input(self, events: list[pygame.event.Event]) -> None:
         for e in events:
@@ -308,6 +361,7 @@ class CricketGame:
             self.user = auth.get_user_by_id(self.user.id)
             self.records = auth.recent_matches(self.user.id) if self.user else []
             self.board = auth.leaderboard()
+            self.records_tab = "MATCHES"
             self.records_page = 0
             self.state = "RECORDS"
             self.play(self.sfx_ok)
@@ -362,22 +416,44 @@ class CricketGame:
         for e in events:
             if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                 mx, my = (coord // SCALE for coord in e.pos)
-                if pygame.Rect(12, 150, 90, 18).collidepoint(mx, my):
+                if pygame.Rect(20, 26, 130, 14).collidepoint(mx, my):
+                    self.records_tab = "MATCHES"
+                    self.records_page = 0
+                    self.play(self.sfx_bowl)
+                elif pygame.Rect(170, 26, 130, 14).collidepoint(mx, my):
+                    self.records_tab = "LEADERBOARD"
+                    self.records_page = 0
+                    self.play(self.sfx_bowl)
+                elif pygame.Rect(12, 150, 90, 18).collidepoint(mx, my):
                     self._change_records_page(-1)
                 elif pygame.Rect(218, 150, 90, 18).collidepoint(mx, my):
                     self._change_records_page(1)
                 elif pygame.Rect(110, 150, 100, 18).collidepoint(mx, my):
                     self.state = "MENU"
-            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_LEFT, pygame.K_a):
-                self._change_records_page(-1)
-            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_RIGHT, pygame.K_d):
-                self._change_records_page(1)
-            elif e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
-                self.state = "MENU"
+            elif e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_TAB:
+                    self.records_tab = "LEADERBOARD" if self.records_tab == "MATCHES" else "MATCHES"
+                    self.records_page = 0
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_1, pygame.K_KP1):
+                    self.records_tab = "MATCHES"
+                    self.records_page = 0
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_2, pygame.K_KP2):
+                    self.records_tab = "LEADERBOARD"
+                    self.records_page = 0
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_LEFT, pygame.K_a):
+                    self._change_records_page(-1)
+                elif e.key in (pygame.K_RIGHT, pygame.K_d):
+                    self._change_records_page(1)
+                elif e.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+                    self.state = "MENU"
 
     def _change_records_page(self, direction: int) -> None:
         per_page = 7
-        page_count = max(1, math.ceil(len(self.records) / per_page))
+        total_items = len(self.records) if self.records_tab == "MATCHES" else len(self.board)
+        page_count = max(1, math.ceil(total_items / per_page))
         next_page = self.records_page + direction
         if 0 <= next_page < page_count:
             self.records_page = next_page
@@ -385,9 +461,35 @@ class CricketGame:
 
     def _result_input(self, events: list[pygame.event.Event]) -> None:
         for e in events:
-            if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
-                self.state = "MENU"
-                self.play(self.sfx_ok)
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                mx, my = (coord // SCALE for coord in e.pos)
+                if pygame.Rect(44, 120, 110, 18).collidepoint(mx, my):
+                    self.result_index = 0
+                    self._confirm_result_choice()
+                elif pygame.Rect(166, 120, 110, 18).collidepoint(mx, my):
+                    self.result_index = 1
+                    self._confirm_result_choice()
+            elif e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_LEFT, pygame.K_a):
+                    self.result_index = 0
+                    self.play(self.sfx_bowl)
+                elif e.key in (pygame.K_RIGHT, pygame.K_d):
+                    self.result_index = 1
+                    self.play(self.sfx_bowl)
+                elif e.key == pygame.K_SPACE:
+                    self.result_index = 0
+                    self._confirm_result_choice()
+                elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    self._confirm_result_choice()
+                elif e.key == pygame.K_ESCAPE:
+                    self.state = "MENU"
+
+    def _confirm_result_choice(self) -> None:
+        if self.result_index == 0:
+            self._start_match()
+        else:
+            self.state = "MENU"
+            self.play(self.sfx_ok)
 
     def _target_input(self, events: list[pygame.event.Event]) -> None:
         for e in events:
@@ -613,6 +715,10 @@ class CricketGame:
             self.match.over_runs.append(str(runs) if runs else ".")
             color = GOLD if runs >= 4 else (CYAN if runs else WHITE)
             self.chips.append(Chip(label, color, 80))
+            if runs > 0 and self.match.combo >= 2:
+                self.chips.append(
+                    Chip(f"COMBO X{self.match.combo}!", PINK, 75, y=86.0)
+                )
             self.play(self.sfx_six if runs == 6 else self.sfx_ok)
 
         if len(self.match.over_runs) > 6:
@@ -652,8 +758,15 @@ class CricketGame:
             self._draw_target()
         elif self.state == "PLAY":
             self._draw_play()
+        elif self.state == "PAUSE":
+            self._draw_pause()
         elif self.state == "RESULT":
             self._draw_result()
+        if self.state not in ("PLAY", "PAUSE"):
+            if self.muted:
+                blit_text(self.canvas, "[MUTED]", W - 48, 4, PINK, 1)
+            if self.flash_timer > 0 and self.state not in ("AUTH",):
+                blit_text_center(self.canvas, self.flash, W // 2, 4, PINK, 1)
         scanlines(self.canvas, 28)
 
     def _sky_grass(self) -> None:
@@ -753,23 +866,56 @@ class CricketGame:
         for y in range(0, H, 4):
             pygame.draw.rect(self.canvas, NAVY2, (0, y, W, 2))
         self._panel(8, 6, 304, 140)
-        blit_text_center(self.canvas, "MATCH RECORDS", W // 2, 12, GOLD, 2)
-        name = self.user.username.upper() if self.user else "PLAYER"
-        best = self.user.high_score if self.user else 0
-        blit_text(self.canvas, f"{name[:12]}  BEST:{best}", 16, 34, CREAM, 1)
-        blit_text(self.canvas, "#  SCORE  OVERS  4S 6S", 16, 48, CYAN, 1)
-        pygame.draw.line(self.canvas, GRAY, (16, 58), (304, 58))
-        if not self.records:
-            blit_text_center(self.canvas, "NO SCORES YET - GO BAT!", W // 2, 88, GRAY, 1)
+        blit_text_center(self.canvas, "RECORDS & STATS", W // 2, 10, GOLD, 2)
+
+        tab_y = 26
+        matches_on = self.records_tab == "MATCHES"
+        pygame.draw.rect(self.canvas, NAVY if matches_on else BLACK, (20, tab_y, 130, 14))
+        pygame.draw.rect(self.canvas, GOLD if matches_on else GRAY, (20, tab_y, 130, 14), 1)
+        blit_text_center(self.canvas, "[1] MY MATCHES", 85, tab_y + 3, GOLD if matches_on else WHITE, 1)
+
+        board_on = self.records_tab == "LEADERBOARD"
+        pygame.draw.rect(self.canvas, NAVY if board_on else BLACK, (170, tab_y, 130, 14))
+        pygame.draw.rect(self.canvas, GOLD if board_on else GRAY, (170, tab_y, 130, 14), 1)
+        blit_text_center(self.canvas, "[2] TOP SCORES", 235, tab_y + 3, GOLD if board_on else WHITE, 1)
+
         per_page = 7
-        start = self.records_page * per_page
-        for i, rec in enumerate(self.records[start : start + per_page]):
-            match_no = len(self.records) - (start + i)
-            overs = f"{rec['balls'] // 6}.{rec['balls'] % 6}"
-            line = f"{match_no:<2} {rec['runs']}/{rec['wickets']:<2}  {overs:<4}  {rec['fours']:<2} {rec['sixes']:<2}"
-            blit_text(self.canvas, line, 16, 64 + i * 11, WHITE, 1)
-        page_count = max(1, math.ceil(len(self.records) / per_page))
-        blit_text_center(self.canvas, f"PAGE {self.records_page + 1}/{page_count}", W // 2, 132, GOLD, 1)
+        if matches_on:
+            name = self.user.username.upper() if self.user else "PLAYER"
+            best = self.user.high_score if self.user else 0
+            blit_text(self.canvas, f"{name[:10]}  BEST:{best}", 16, 44, CREAM, 1)
+            blit_text(self.canvas, "#  SCORE  OVERS  4S 6S", 16, 56, CYAN, 1)
+            pygame.draw.line(self.canvas, GRAY, (16, 66), (304, 66))
+            if not self.records:
+                blit_text_center(self.canvas, "NO SCORES YET - GO BAT!", W // 2, 95, GRAY, 1)
+            start = self.records_page * per_page
+            for i, rec in enumerate(self.records[start : start + per_page]):
+                match_no = len(self.records) - (start + i)
+                overs = f"{rec['balls'] // 6}.{rec['balls'] % 6}"
+                line = f"{match_no:<2} {rec['runs']}/{rec['wickets']:<2}  {overs:<4}  {rec['fours']:<2} {rec['sixes']:<2}"
+                blit_text(self.canvas, line, 16, 72 + i * 9, WHITE, 1)
+            page_count = max(1, math.ceil(len(self.records) / per_page))
+        else:
+            blit_text(self.canvas, "ALL-TIME LEADERBOARD", 16, 44, CREAM, 1)
+            blit_text(self.canvas, "RANK  BATTER            BEST", 16, 56, CYAN, 1)
+            pygame.draw.line(self.canvas, GRAY, (16, 66), (304, 66))
+            if not self.board:
+                blit_text_center(self.canvas, "NO SCORES RECORDED YET", W // 2, 95, GRAY, 1)
+            start = self.records_page * per_page
+            for i, (uname, best_runs) in enumerate(self.board[start : start + per_page]):
+                rank = start + i + 1
+                line = f"{rank:<4}  {uname[:16]:<16}  {best_runs:>4}"
+                blit_text(self.canvas, line, 16, 72 + i * 9, WHITE, 1)
+            page_count = max(1, math.ceil(len(self.board) / per_page))
+
+        blit_text_center(
+            self.canvas,
+            f"PAGE {self.records_page + 1}/{page_count}  (TAB TOGGLES)",
+            W // 2,
+            134,
+            GOLD,
+            1,
+        )
         self._record_button("PREV", 12, self.records_page > 0)
         self._record_button("BACK", 110, True)
         self._record_button("NEXT", 218, self.records_page + 1 < page_count)
@@ -884,6 +1030,8 @@ class CricketGame:
         this_over = " ".join(m.over_runs[-6:] or ["-"])
         blit_text(self.canvas, f"O:{this_over}", 112, 162, WHITE, 1)
         blit_text(self.canvas, f"SHOT:{self.shot}", 196, 162, CYAN, 1)
+        if self.muted:
+            blit_text(self.canvas, "[MUTED]", 262, 162, PINK, 1)
 
         # Repeating an attacking shot builds fatigue, so changing shots matters.
         bar_x, bar_y, bar_w, bar_h = 4, 169, 70, 7
@@ -916,28 +1064,53 @@ class CricketGame:
         for chip in self.chips:
             blit_text_center(self.canvas, chip.text, W // 2, int(chip.y), chip.color, 2)
 
+    def _draw_pause(self) -> None:
+        self._draw_play()
+        self._panel(75, 40, 170, 95)
+        blit_text_center(self.canvas, "PAUSED", W // 2, 48, GOLD, 2)
+        items = ["RESUME", "QUIT TO MENU"]
+        for i, item in enumerate(items):
+            y = 74 + i * 22
+            on = i == self.pause_index
+            pygame.draw.rect(self.canvas, NAVY if on else BLACK, (95, y, 130, 18))
+            pygame.draw.rect(self.canvas, GOLD if on else GRAY, (95, y, 130, 18), 1)
+            label = f"> {item}" if on else f"  {item}"
+            blit_text_center(self.canvas, label, W // 2, y + 5, GOLD if on else WHITE, 1)
+        blit_text_center(self.canvas, "ARROWS + ENTER OR ESC", W // 2, 122, GRAY, 1)
+
     def _draw_result(self) -> None:
         self._sky_grass()
-        self._panel(40, 24, 240, 120)
+        self._panel(32, 16, 256, 144)
         m = self.match
         result = "TARGET CHASED!" if m.won else "INNINGS OVER"
         result_color = GOLD if m.won else RED
-        blit_text_center(self.canvas, result, W // 2, 32, result_color, 2)
-        blit_text_center(self.canvas, f"{m.runs} RUNS", W // 2, 56, WHITE, 2)
+        blit_text_center(self.canvas, result, W // 2, 24, result_color, 2)
+        blit_text_center(self.canvas, f"{m.runs} RUNS", W // 2, 46, WHITE, 2)
         blit_text_center(
             self.canvas,
             f"{m.wickets} DOWN   {m.overs_text} OVERS",
             W // 2,
-            80,
+            68,
             CREAM,
             1,
         )
         target_status = "TARGET MET" if m.won else f"TARGET {m.target_runs}"
-        blit_text_center(self.canvas, target_status, W // 2, 96, GOLD if m.won else PINK, 1)
-        blit_text_center(self.canvas, f"{m.fours} FOURS   {m.sixes} SIXES", W // 2, 108, CYAN, 1)
+        blit_text_center(self.canvas, target_status, W // 2, 82, GOLD if m.won else PINK, 1)
+        blit_text_center(self.canvas, f"{m.fours} FOURS   {m.sixes} SIXES", W // 2, 94, CYAN, 1)
         if self.user:
-            blit_text_center(self.canvas, f"SAVED TO {self.user.username.upper()}", W // 2, 122, PINK, 1)
-        blit_text_center(self.canvas, "ENTER FOR MENU", W // 2, 134, WHITE, 1)
+            blit_text_center(self.canvas, f"SAVED TO {self.user.username.upper()}", W // 2, 106, PINK, 1)
+
+        again_on = self.result_index == 0
+        pygame.draw.rect(self.canvas, NAVY if again_on else BLACK, (44, 120, 110, 18))
+        pygame.draw.rect(self.canvas, GOLD if again_on else GRAY, (44, 120, 110, 18), 1)
+        blit_text_center(self.canvas, "PLAY AGAIN", 99, 125, GOLD if again_on else WHITE, 1)
+
+        menu_on = self.result_index == 1
+        pygame.draw.rect(self.canvas, NAVY if menu_on else BLACK, (166, 120, 110, 18))
+        pygame.draw.rect(self.canvas, GOLD if menu_on else GRAY, (166, 120, 110, 18), 1)
+        blit_text_center(self.canvas, "MAIN MENU", 221, 125, GOLD if menu_on else WHITE, 1)
+
+        blit_text_center(self.canvas, "SPACE: PLAY AGAIN   ENTER: SELECT", W // 2, 144, GRAY, 1)
 
 
 def main() -> None:

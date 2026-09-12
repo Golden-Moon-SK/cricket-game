@@ -11,8 +11,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DB_PATH = PROJECT_ROOT / "users.db"
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
+
+DEFAULT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash BLOB NOT NULL,
+    salt BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    runs INTEGER NOT NULL,
+    wickets INTEGER NOT NULL,
+    balls INTEGER NOT NULL,
+    fours INTEGER NOT NULL,
+    sixes INTEGER NOT NULL,
+    played_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+"""
+
+
+def _resolve_db_path() -> Path:
+    """Return a writable SQLite database path, falling back to ~/.8bit_cricket/ if needed."""
+    local_db = PROJECT_ROOT / "users.db"
+    try:
+        if local_db.exists() and os.access(local_db, os.W_OK):
+            return local_db
+        if not local_db.exists() and os.access(PROJECT_ROOT, os.W_OK):
+            return local_db
+    except Exception:
+        pass
+    fallback_dir = Path.home() / ".8bit_cricket"
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    return fallback_dir / "users.db"
+
+
+DB_PATH = _resolve_db_path()
 PBKDF2_ROUNDS = 120_000
 MIN_USERNAME = 3
 MAX_USERNAME = 16
@@ -35,8 +74,13 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    schema = (
+        SCHEMA_PATH.read_text(encoding="utf-8")
+        if SCHEMA_PATH.exists()
+        else DEFAULT_SCHEMA
+    )
     with _connect() as conn:
-        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.executescript(schema)
 
 
 def _hash_password(password: str, salt: bytes) -> bytes:
