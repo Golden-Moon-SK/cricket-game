@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import pygame
+try:
+    import pygame
+except Exception:
+    pygame = None
 
 # 5x7 glyphs, row-major bits (1 = on)
 _GLYPHS: dict[str, tuple[str, ...]] = {

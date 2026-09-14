@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS matches (
 
 
 def _resolve_db_path() -> Path:
-    """Return a writable SQLite database path, falling back to ~/.8bit_cricket/ if needed."""
+    """Return a writable SQLite database path, falling back to ~/.8bit_cricket/ or /tmp if needed."""
     local_db = PROJECT_ROOT / "users.db"
     try:
         if local_db.exists() and os.access(local_db, os.W_OK):
@@ -46,9 +46,21 @@ def _resolve_db_path() -> Path:
             return local_db
     except Exception:
         pass
-    fallback_dir = Path.home() / ".8bit_cricket"
-    fallback_dir.mkdir(parents=True, exist_ok=True)
-    return fallback_dir / "users.db"
+    try:
+        fallback_dir = Path.home() / ".8bit_cricket"
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        test_file = fallback_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink(missing_ok=True)
+        return fallback_dir / "users.db"
+    except Exception:
+        pass
+    tmp_dir = Path("/tmp/.8bit_cricket")
+    try:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        return tmp_dir / "users.db"
+    except Exception:
+        return Path("/tmp/users.db")
 
 
 DB_PATH = _resolve_db_path()

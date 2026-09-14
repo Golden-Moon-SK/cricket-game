@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>8-BIT CRICKET — Retro Arcade Web Edition</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body {
+      background-color: #0c0f1d;
+      color: #f8f8f8;
+      font-family: 'Courier New', Courier, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      overflow-x: hidden;
+    }
+    .arcade-cabinet {
+      background: #181c2e;
+      border: 4px solid #f8b830;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 0 30px rgba(248, 184, 48, 0.25), inset 0 0 15px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 100%;
+    }
+    .cabinet-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 0 8px;
+    }
+    .cabinet-title {
+      font-weight: 900;
+      font-size: 18px;
+      letter-spacing: 2px;
+      color: #f8b830;
+      text-shadow: 2px 2px #c82430;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #58dcdc;
+    }
+    .led-green {
+      width: 8px;
+      height: 8px;
+      background-color: #38ef7d;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #38ef7d;
+    }
+    .canvas-container {
+      position: relative;
+      background-color: #080810;
+      border: 3px solid #f8e8b0;
+      border-radius: 6px;
+      overflow: hidden;
+      line-height: 0;
+    }
+    canvas {
+      display: block;
+      width: min(92vw, 960px);
+      aspect-ratio: 320 / 180;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .crt-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+      background-size: 100% 4px;
+      z-index: 10;
+    }
+    /* Controls Bar */
+    .controls-panel {
+      margin-top: 14px;
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+    }
+    .btn {
+      background: #101438;
+      color: #f8e8b0;
+      border: 2px solid #f8b830;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: bold;
+      font-family: inherit;
+      cursor: pointer;
+      text-transform: uppercase;
+      box-shadow: 0 3px #000;
+      transition: all 0.05s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn:active {
+      transform: translateY(2px);
+      box-shadow: 0 1px #000;
+      background: #f8b830;
+      color: #101438;
+    }
+    .btn-action {
+      background: #c82430;
+      color: #fff;
+      border-color: #f8e8b0;
+      font-size: 14px;
+      padding: 10px 20px;
+    }
+    .btn-action:active {
+      background: #f8b830;
+      color: #000;
+    }
+    .instructions {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #7280a4;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .key-badge {
+      display: inline-block;
+      background: #283658;
+      color: #f8f8f8;
+      border: 1px solid #485068;
+      border-radius: 4px;
+      padding: 2px 5px;
+      font-size: 10px;
+      margin: 0 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="arcade-cabinet">
+    <div class="cabinet-header">
+      <div class="cabinet-title">🏏 8-BIT CRICKET</div>
+      <div class="status-badge">
+        <div class="led-green"></div>
+        <span>ONLINE LIVE</span>
+      </div>
+    </div>
+
+    <div class="canvas-container">
+      <canvas id="gameCanvas" width="320" height="180"></canvas>
+      <div class="crt-overlay"></div>
+    </div>
+
+    <div class="controls-panel">
+      <button class="btn" id="btnShotLeft">◀ SHOT</button>
+      <button class="btn btn-action" id="btnSpace">⚡ SPACE / BAT</button>
+      <button class="btn" id="btnShotRight">SHOT ▶</button>
+      <button class="btn" id="btnEnter">ENTER</button>
+      <button class="btn" id="btnEsc">ESC</button>
+      <button class="btn" id="btnMute">🔊 MUTE</button>
+    </div>
+
+    <div class="instructions">
+      <span class="key-badge">SPACE</span> Bat / Rematch &nbsp;|&nbsp;
+      <span class="key-badge">A / D</span> or <span class="key-badge">◀ / ▶</span> Change Shot &nbsp;|&nbsp;
+      <span class="key-badge">ENTER</span> Confirm &nbsp;|&nbsp;
+      <span class="key-badge">ESC</span> Pause &nbsp;|&nbsp;
+      <span class="key-badge">M</span> Sound
+    </div>
+  </div>
+
+  <script>
+    // --- 5x7 Retro Font Glyphs ---
+    const GLYPHS = {
+      " ": ["00000","00000","00000","00000","00000","00000","00000"],
+      "A": ["01110","10001","10001","11111","10001","10001","10001"],
+      "B": ["11110","10001","10001","11110","10001","10001","11110"],
+      "C": ["01110","10001","10000","10000","10000","10001","01110"],
+      "D": ["11110","10001","10001","10001","10001","10001","11110"],
+      "E": ["11111","10000","10000","11110","10000","10000","11111"],
+      "F": ["11111","10000","10000","11110","10000","10000","10000"],
+      "G": ["01110","10001","10000","10111","10001","10001","01110"],
+      "H": ["10001","10001","10001","11111","10001","10001","10001"],
+      "I": ["11111","00100","00100","00100","00100","00100","11111"],
+      "J": ["00111","00010","00010","00010","00010","10010","01100"],
+      "K": ["10001","10010","10100","11000","10100","10010","10001"],
+      "L": ["10000","10000","10000","10000","10000","10000","11111"],
+      "M": ["10001","11011","10101","10101","10001","10001","10001"],
+      "N": ["10001","11001","10101","10011","10001","10001","10001"],
+      "O": ["01110","10001","10001","10001","10001","10001","01110"],
+      "P": ["11110","10001","10001","11110","10000","10000","10000"],
+      "Q": ["01110","10001","10001","10001","10101","10010","01101"],
+      "R": ["11110","10001","10001","11110","10100","10010","10001"],
+      "S": ["01111","10000","10000","01110","00001","00001","11110"],
+      "T": ["11111","00100","00100","00100","00100","00100","00100"],
+      "U": ["10001","10001","10001","10001","10001","10001","01110"],
+      "V": ["10001","10001","10001","10001","10001","01010","00100"],
+      "W": ["10001","10001","10001","10101","10101","11011","10001"],
+      "X": ["10001","10001","01010","00100","01010","10001","10001"],
+      "Y": ["10001","10001","01010","00100","00100","00100","00100"],
+      "Z": ["11111","00001","00010","00100","01000","10000","11111"],
+      "0": ["01110","10001","10011","10101","11001","10001","01110"],
+      "1": ["00100","01100","00100","00100","00100","00100","01110"],
+      "2": ["01110","10001","00001","00010","00100","01000","11111"],
+      "3": ["01110","10001","00001","00110","00001","10001","01110"],
+      "4": ["00010","00110","01010","10010","11111","00010","00010"],
+      "5": ["11111","10000","11110","00001","00001","10001","01110"],
+      "6": ["01110","10000","11110","10001","10001","10001","01110"],
+      "7": ["11111","00001","00010","00100","01000","01000","01000"],
+      "8": ["01110","10001","10001","01110","10001","10001","01110"],
+      "9": ["01110","10001","10001","01111","00001","00001","01110"],
+      ".": ["00000","00000","00000","00000","00000","00100","00100"],
+      ",": ["00000","00000","00000","00000","00100","00100","01000"],
+      "!": ["00100","00100","00100","00100","00100","00000","00100"],
+      "?": ["01110","10001","00001","00010","00100","00000","00100"],
+      ":": ["00000","00100","00100","00000","00100","00100","00000"],
+      "/": ["00001","00010","00010","00100","01000","01000","10000"],
+      "-": ["00000","00000","00000","11111","00000","00000","00000"],
+      "_": ["00000","00000","00000","00000","00000","00000","11111"],
+      "+": ["00000","00100","00100","11111","00100","00100","00000"],
+      "*": ["00000","10101","01110","11111","01110","10101","00000"],
+      "(": ["00010","00100","01000","01000","01000","00100","00010"],
+      ")": ["01000","00100","00010","00010","00010","00100","01000"],
+      "'": ["00100","00100","01000","00000","00000","00000","00000"],
+      "=": ["00000","00000","11111","00000","11111","00000","00000"],
+      ">": ["10000","01000","00100","00010","00100","01000","10000"],
+      "<": ["00001","00010","00100","01000","00100","00010","00001"],
+      "#": ["01010","11111","01010","01010","11111","01010","00000"],
+      "%": ["11001","11010","00100","01000","01011","10011","00000"],
+      "[": ["01110","01000","01000","01000","01000","01000","01110"],
+      "]": ["01110","00010","00010","00010","00010","00010","01110"],
+    };
+
+    // Color Palette
+    const C = {
+      NAVY: 'rgb(16, 20, 56)',
+      NAVY2: 'rgb(28, 36, 88)',
+      SKY: 'rgb(48, 72, 168)',
+      SKY2: 'rgb(72, 108, 196)',
+      GRASS: 'rgb(40, 120, 48)',
+      GRASS2: 'rgb(28, 92, 36)',
+      PITCH: 'rgb(196, 164, 92)',
+      PITCH2: 'rgb(176, 140, 72)',
+      CREAM: 'rgb(248, 232, 176)',
+      WHITE: 'rgb(248, 248, 248)',
+      RED: 'rgb(200, 36, 48)',
+      DARK_RED: 'rgb(128, 16, 32)',
+      GOLD: 'rgb(248, 184, 48)',
+      BLACK: 'rgb(8, 8, 16)',
+      WOOD: 'rgb(168, 108, 40)',
+      SKIN: 'rgb(232, 176, 120)',
+      BLUE: 'rgb(48, 80, 176)',
+      CYAN: 'rgb(88, 220, 220)',
+      PINK: 'rgb(248, 120, 168)',
+      GRAY: 'rgb(72, 80, 104)',
+    };
+
+    const W = 320, H = 180;
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.imageSmoothingEnabled = false;
+
+    // --- Web Audio Synthesizer ---
+    let audioCtx = null;
+    let isMuted = false;
+
+    function initAudio() {
+      if (!audioCtx) {
+        const AudioClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioClass) audioCtx = new AudioClass();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playTone(freq, durationMs) {
+      if (isMuted || !audioCtx) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + durationMs / 1000);
+      } catch (e) {}
+    }
+
+    const sfxOk = () => playTone(880, 80);
+    const sfxBad = () => playTone(140, 160);
+    const sfxSix = () => playTone(1320, 120);
+    const sfxBowl = () => playTone(220, 60);
+
+    // --- Bitmap Drawing Helpers ---
+    function blitText(text, x, y, color, scale = 1, shadow = C.BLACK) {
+      let px = Math.floor(x);
+      let py = Math.floor(y);
+      let maxX = px;
+      const upper = text.toUpperCase();
+
+      for (let i = 0; i < upper.length; i++) {
+        const ch = upper[i];
+        if (ch === '\n') {
+          py += 8 * scale;
+          px = Math.floor(x);
+          continue;
+        }
+        const glyph = GLYPHS[ch] || GLYPHS['?'];
+        if (shadow) {
+          drawGlyph(glyph, px + scale, py + scale, shadow, scale);
+        }
+        drawGlyph(glyph, px, py, color, scale);
+        px += 6 * scale;
+        if (px > maxX) maxX = px;
+      }
+      return { x, y, w: maxX - x, h: 7 * scale };
+    }
+
+    function textWidth(text, scale = 1) {
+      const lines = text.toUpperCase().split('\n');
+      let maxLen = 0;
+      for (const line of lines) {
+        if (line.length > maxLen) maxLen = line.length;
+      }
+      return maxLen * 6 * scale;
+    }
+
+    function blitTextCenter(text, cx, y, color, scale = 1, shadow = C.BLACK) {
+      const w = textWidth(text, scale);
+      return blitText(text, cx - Math.floor(w / 2), y, color, scale, shadow);
+    }
+
+    function drawGlyph(glyph, x, y, color, scale) {
+      ctx.fillStyle = color;
+      for (let gy = 0; gy < 7; gy++) {
+        const row = glyph[gy];
+        for (let gx = 0; gx < 5; gx++) {
+          if (row[gx] === '1') {
+            ctx.fillRect(x + gx * scale, y + gy * scale, scale, scale);
+          }
+        }
+      }
+    }
+
+    function ditherRect(x, y, w, h, c1, c2) {
+      for (let yy = y; yy < y + h; yy++) {
+        for (let xx = x; xx < x + w; xx++) {
+          ctx.fillStyle = (xx + yy) % 2 === 0 ? c1 : c2;
+          ctx.fillRect(xx, yy, 1, 1);
+        }
+      }
+    }
+
+    // --- Game Model & State ---
+    const MAX_OVERS = 5;
+    const MAX_WICKETS = 3;
+    const MAX_ENERGY = 100;
+    const SHOT_ENERGY_COST = { "DEFEND": 0, "DRIVE": 8, "LOFT": 15 };
+    const REPEAT_SHOT_FATIGUE = { "DRIVE": 4, "LOFT": 6 };
+
+    class Chip {
+      constructor(text, color, life = 70, y = 70.0) {
+        this.text = text;
+        this.color = color;
+        this.life = life;
+        this.max_life = life;
+        this.y = y;
+      }
+      tick() {
+        this.life--;
+        this.y -= 0.35;
+      }
+      get alive() {
+        return this.life > 0;
+      }
+    }
+
+    class Match {
+      constructor() {
+        this.runs = 0;
+        this.wickets = 0;
+        this.balls = 0;
+        this.fours = 0;
+        this.sixes = 0;
+        this.last_result = "PLAY";
+        this.combo = 0;
+        this.over_runs = [];
+        this.energy = MAX_ENERGY;
+        this.shot_uses = { "DRIVE": 0, "LOFT": 0 };
+        this.target_balls = 24;
+        this.target_runs = 30;
+      }
+      get overs_text() {
+        return `${Math.floor(this.balls / 6)}.${this.balls % 6}`;
+      }
+      get finished() {
+        return this.runs >= this.target_runs || this.wickets >= MAX_WICKETS || this.balls >= this.target_balls;
+      }
+      get won() {
+        return this.runs >= this.target_runs;
+      }
+    }
+
+    // Local Storage Data Store
+    function loadLocalUser() {
+      try {
+        const u = localStorage.getItem('8bit_user');
+        return u ? JSON.parse(u) : { username: 'PLAYER 1', high_score: 0, matches_played: 0 };
+      } catch (e) {
+        return { username: 'PLAYER 1', high_score: 0, matches_played: 0 };
+      }
+    }
+
+    function saveLocalUser(u) {
+      try {
+        localStorage.setItem('8bit_user', JSON.stringify(u));
+      } catch (e) {}
+    }
+
+    function loadMatches() {
+      try {
+        const m = localStorage.getItem('8bit_matches');
+        return m ? JSON.parse(m) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveMatchRecord(m) {
+      try {
+        const records = loadMatches();
+        records.unshift(m);
+        localStorage.setItem('8bit_matches', JSON.stringify(records.slice(0, 50)));
+      } catch (e) {}
+    }
+
+    // --- Main Game Class ---
+    class Game {
+      constructor() {
+        this.state = "TITLE";
+        this.user = loadLocalUser();
+        this.auth_mode = "LOGIN";
+        this.field = "username";
+        this.username = "";
+        this.password = "";
+        this.flash = "";
+        this.flash_timer = 0;
+        this.cursor_blink = 0;
+        this.menu_index = 0;
+        this.title_tick = 0;
+
+        this.match = new Match();
+        this.phase = "idle";
+        this.phase_t = 0;
+        this.bowler_x = 40;
+        this.ball_x = 0;
+        this.ball_y = 0;
+        this.ball_z = 0;
+        this.timing = 0.0;
+        this.timing_dir = 1;
+        this.timing_speed = 0.016;
+        this.sweet_spot = 0.52;
+        this.shot = "DRIVE";
+        this.shot_index = 1;
+        this.swung = false;
+        this.ball_kind = "GOOD OFF";
+        this.ball_frames = 48;
+        this.ball_line = 0.0;
+        this.ball_length = 0.5;
+        this.land_x = 160.0;
+        this.land_y = 104.0;
+        this.bounce_t = 0.55;
+        this.chips = [];
+        this.crowd = Array.from({ length: 180 }, () => {
+          const cols = [C.PINK, C.CYAN, C.GOLD, C.WHITE, C.RED];
+          return cols[Math.floor(Math.random() * cols.length)];
+        });
+        this.records = [];
+        this.records_tab = "MATCHES";
+        this.records_page = 0;
+        this.pause_index = 0;
+        this.result_index = 0;
+
+        this.setFlash("READY TO BAT!", 120);
+      }
+
+      setFlash(msg, frames = 160) {
+        this.flash = msg;
+        this.flash_timer = frames;
+      }
+
+      shotEnergyCost(shot) {
+        return (SHOT_ENERGY_COST[shot] || 0) + ((this.match.shot_uses[shot] || 0) * (REPEAT_SHOT_FATIGUE[shot] || 0));
+      }
+
+      startMatch() {
+        const targetBalls = [18, 20, 22, 24][Math.floor(Math.random() * 4)];
+        const targetRuns = Math.floor(targetBalls * (1.15 + Math.random() * 0.35));
+        this.match = new Match();
+        this.match.target_balls = targetBalls;
+        this.match.target_runs = targetRuns;
+        this.phase = "idle";
+        this.phase_t = 0;
+        this.chips = [];
+        this.shot_index = 1;
+        this.shot = "DRIVE";
+        this.state = "TARGET";
+        sfxOk();
+      }
+
+      rollDelivery() {
+        this.sweet_spot = 0.26 + Math.random() * 0.48;
+        this.timing_speed = 0.013 + Math.random() * 0.011;
+        this.timing_dir = Math.random() > 0.5 ? 1 : -1;
+        this.timing = this.timing_dir > 0 ? 0.0 : 1.0;
+        this.ball_line = (Math.random() * 2.0) - 1.0;
+        this.ball_length = 0.08 + Math.random() * 0.84;
+        this.land_x = 208.0 - this.ball_length * 96.0;
+        this.land_y = 104.0 + this.ball_line * 10.0;
+        this.bounce_t = 0.34 + (1.0 - this.ball_length) * 0.38;
+        this.ball_frames = Math.floor(42 + Math.random() * 18);
+
+        let lenName = "GOOD";
+        if (this.ball_length < 0.28) {
+          lenName = "YORKER";
+          this.ball_frames = Math.floor(40 + Math.random() * 10);
+        } else if (this.ball_length < 0.52) {
+          lenName = "FULL";
+        } else if (this.ball_length >= 0.76) {
+          lenName = "SHORT";
+          this.ball_frames = Math.floor(46 + Math.random() * 12);
+        }
+
+        let lineName = "MID";
+        if (this.ball_line < -0.33) lineName = "LEG";
+        else if (this.ball_line > 0.33) lineName = "OFF";
+
+        this.ball_kind = `${lenName} ${lineName}`;
+      }
+
+      startDelivery() {
+        this.rollDelivery();
+        this.phase = "runup";
+        this.phase_t = 0;
+        this.bowler_x = 28;
+        this.match.last_result = "...";
+      }
+
+      flyBall(t) {
+        const bounce = Math.max(0.18, Math.min(0.82, this.bounce_t));
+        if (t < bounce) {
+          const u = t / bounce;
+          this.ball_x = 78.0 + u * (this.land_x - 78.0);
+          this.ball_y = 96.0 + u * (this.land_y - 96.0);
+          this.ball_z = 12.0 * (1.0 - u) * (1.0 - u) + 1.0;
+        } else {
+          const u = (t - bounce) / Math.max(0.01, 1.0 - bounce);
+          this.ball_x = this.land_x + u * (246.0 - this.land_x);
+          this.ball_y = this.land_y + Math.sin(u * Math.PI) * this.ball_line * 3.0;
+          this.ball_z = Math.abs(Math.sin(u * Math.PI)) * (3.5 + this.ball_length * 7.0);
+        }
+      }
+
+      swing() {
+        this.swung = true;
+        this.resolveShot(false);
+      }
+
+      resolveShot(missed) {
+        const window = Math.abs(this.timing - this.sweet_spot);
+        const shot = this.shot;
+        let result = "0";
+        let runs = 0;
+        let out = false;
+
+        if (missed) {
+          if (Math.random() < 0.35) {
+            out = true;
+            result = Math.random() < 0.5 ? "BOWLED" : "LBW";
+          } else {
+            result = "DOT";
+          }
+        } else if (shot === "DEFEND") {
+          result = "DEFEND";
+        } else if (this.match.energy < this.shotEnergyCost(shot)) {
+          result = "TIRED";
+        } else {
+          this.match.energy -= this.shotEnergyCost(shot);
+          this.match.shot_uses[shot] = (this.match.shot_uses[shot] || 0) + 1;
+
+          if (window < 0.08) {
+            if (shot === "LOFT") {
+              if (Math.random() < 0.78) {
+                runs = 6;
+                result = "SIX";
+              } else {
+                out = true;
+                result = "CAUGHT";
+              }
+            } else if (shot === "DRIVE") {
+              runs = Math.random() < 0.7 ? 4 : 3;
+              result = runs === 4 ? "FOUR" : "3";
+            } else {
+              runs = 1;
+              result = "1";
+            }
+          } else if (window < 0.18) {
+            if (shot === "LOFT") {
+              const r = Math.random();
+              if (r < 0.45) { runs = 4; result = "FOUR"; }
+              else if (r < 0.85) { out = true; result = "CAUGHT"; }
+              else { runs = 2; result = "2"; }
+            } else if (shot === "DRIVE") {
+              const pool = [1, 2, 2, 4];
+              runs = pool[Math.floor(Math.random() * pool.length)];
+              result = runs === 4 ? "FOUR" : String(runs);
+            } else {
+              runs = Math.random() < 0.4 ? 0 : 1;
+              result = runs ? "1" : "DOT";
+            }
+          } else if (window < 0.32) {
+            if (Math.random() < 0.22) {
+              out = true;
+              result = Math.random() < 0.5 ? "EDGE" : "BOWLED";
+            } else {
+              runs = Math.random() < 0.3 ? 1 : 0;
+              result = runs ? "1" : "DOT";
+            }
+          } else {
+            if (Math.random() < 0.55) {
+              out = true;
+              result = Math.random() < 0.5 ? "BOWLED" : "MISS";
+            } else {
+              result = "DOT";
+            }
+          }
+        }
+
+        this.match.balls++;
+        if (out) {
+          this.match.wickets++;
+          this.match.combo = 0;
+          this.match.last_result = result;
+          this.match.over_runs.push("W");
+          this.chips.push(new Chip("WICKET!", C.RED, 90));
+          sfxBad();
+        } else {
+          this.match.runs += runs;
+          this.match.combo = runs > 0 ? this.match.combo + 1 : 0;
+          if (runs === 4) this.match.fours++;
+          if (runs === 6) this.match.sixes++;
+
+          let label = result;
+          if (runs === 4) label = "FOUR!";
+          else if (runs === 6) label = "SIX!!";
+          else if (result !== "DEFEND" && result !== "TIRED") label = runs ? String(runs) : "DOT";
+
+          this.match.last_result = label;
+          this.match.over_runs.push(runs ? String(runs) : ".");
+          const col = runs >= 4 ? C.GOLD : (runs ? C.CYAN : C.WHITE);
+          this.chips.push(new Chip(label, col, 80));
+
+          if (runs > 0 && this.match.combo >= 2) {
+            this.chips.push(new Chip(`COMBO X${this.match.combo}!`, C.PINK, 75, 86.0));
+          }
+          if (runs === 6) sfxSix();
+          else sfxOk();
+        }
+
+        if (this.match.over_runs.length > 6) {
+          this.match.over_runs = this.match.over_runs.slice(-6);
+        }
+
+        this.phase = "result";
+        this.phase_t = 0;
+      }
+
+      endMatch() {
+        this.state = "RESULT";
+        this.user.matches_played = (this.user.matches_played || 0) + 1;
+        if (this.match.runs > (this.user.high_score || 0)) {
+          this.user.high_score = this.match.runs;
+        }
+        saveLocalUser(this.user);
+        saveMatchRecord({
+          runs: this.match.runs,
+          wickets: this.match.wickets,
+          balls: this.match.balls,
+          fours: this.match.fours,
+          sixes: this.match.sixes,
+          date: new Date().toLocaleDateString()
+        });
+        sfxSix();
+      }
+
+      // --- Updates ---
+      update() {
+        this.title_tick++;
+        this.cursor_blink++;
+        if (this.flash_timer > 0) this.flash_timer--;
+
+        if (this.state === "PLAY") {
+          if (this.phase === "runup") {
+            this.phase_t++;
+            this.bowler_x = 28 + this.phase_t * 1.4;
+            if (this.phase_t > 28) {
+              this.phase = "ball";
+              this.phase_t = 0;
+              this.swung = false;
+              this.ball_x = 78.0;
+              this.ball_y = 96.0;
+              this.ball_z = 10.0;
+              sfxBowl();
+            }
+          } else if (this.phase === "ball") {
+            this.phase_t++;
+            const t = Math.min(1.0, this.phase_t / this.ball_frames);
+            this.flyBall(t);
+            this.timing += this.timing_speed * this.timing_dir;
+            if (this.timing > 1) { this.timing = 1; this.timing_dir = -1; }
+            if (this.timing < 0) { this.timing = 0; this.timing_dir = 1; }
+
+            if (t >= 1 && !this.swung) {
+              this.resolveShot(true);
+            }
+          } else if (this.phase === "result") {
+            this.phase_t++;
+            if (this.phase_t > 55) {
+              if (this.match.finished) {
+                this.endMatch();
+              } else {
+                this.phase = "idle";
+                this.phase_t = 0;
+                this.bowler_x = 40;
+              }
+            }
+          }
+
+          this.chips = this.chips.filter(c => c.alive);
+          for (const c of this.chips) c.tick();
+        }
+      }
+
+      // --- Drawing ---
+      draw() {
+        ctx.fillStyle = C.NAVY;
+        ctx.fillRect(0, 0, W, H);
+
+        if (this.state === "TITLE") this.drawTitle();
+        else if (this.state === "AUTH") this.drawAuth();
+        else if (this.state === "MENU") this.drawMenu();
+        else if (this.state === "TARGET") this.drawTarget();
+        else if (this.state === "PLAY") this.drawPlay();
+        else if (this.state === "PAUSE") this.drawPause();
+        else if (this.state === "RESULT") this.drawResult();
+        else if (this.state === "RECORDS") this.drawRecords();
+
+        if (this.state !== "PLAY" && this.state !== "PAUSE") {
+          if (isMuted) blitText("[MUTED]", W - 48, 4, C.PINK, 1);
+          if (this.flash_timer > 0 && this.state !== "AUTH") {
+            blitTextCenter(this.flash, Math.floor(W / 2), 4, C.PINK, 1);
+          }
+        }
+      }
+
+      drawSkyGrass() {
+        ctx.fillStyle = C.SKY;
+        ctx.fillRect(0, 0, W, 70);
+        ctx.fillStyle = C.SKY2;
+        for (let i = 0; i < 40; i++) {
+          ctx.fillRect(i * 8, 0, 4, 70);
+        }
+        ctx.fillStyle = C.GRASS2;
+        ctx.fillRect(0, 70, W, H - 70);
+        ctx.fillStyle = C.GRASS;
+        ctx.fillRect(0, 78, W, H - 78);
+      }
+
+      drawCrowd() {
+        ctx.fillStyle = C.NAVY;
+        ctx.fillRect(0, 52, W, 20);
+        for (let i = 0; i < this.crowd.length; i++) {
+          const x = (i * 7) % W;
+          const y = 54 + (i * 3) % 14;
+          ctx.fillStyle = this.crowd[i];
+          ctx.fillRect(x, y, 2, 3);
+        }
+      }
+
+      drawPitch() {
+        ctx.fillStyle = C.PITCH2;
+        ctx.fillRect(70, 86, 180, 36);
+        ctx.fillStyle = C.PITCH;
+        ctx.fillRect(76, 90, 168, 28);
+        ctx.fillStyle = C.WHITE;
+        ctx.fillRect(88, 90, 1, 28);
+        ctx.fillRect(232, 90, 1, 28);
+
+        // Bowling stumps
+        ctx.fillStyle = C.WOOD;
+        for (const sx of [84, 88, 92]) ctx.fillRect(sx, 78, 2, 16);
+        ctx.fillStyle = C.GOLD;
+        ctx.fillRect(84, 76, 10, 2);
+
+        // Batting stumps
+        ctx.fillStyle = C.WOOD;
+        for (const sx of [228, 232, 236]) ctx.fillRect(sx, 78, 2, 16);
+        ctx.fillStyle = C.GOLD;
+        ctx.fillRect(228, 76, 10, 2);
+      }
+
+      drawBowler(x, y, run) {
+        ctx.fillStyle = C.RED;
+        ctx.fillRect(x + 2, y + 6, 8, 10);
+        ctx.fillStyle = C.SKIN;
+        ctx.fillRect(x + 3, y, 6, 6);
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(x + 4, y + 1, 2, 2);
+        ctx.fillStyle = C.WHITE;
+        ctx.fillRect(x + 2, y + 16, 4, 8);
+        ctx.fillRect(x + 7, y + 16, 4, 8);
+        const arm = run ? -6 : 8;
+        ctx.fillStyle = C.SKIN;
+        ctx.fillRect(x + arm, y + 8, 6, 2);
+      }
+
+      drawBatsman(x, y, swing) {
+        ctx.fillStyle = C.BLUE;
+        ctx.fillRect(x, y + 6, 10, 12);
+        ctx.fillStyle = C.SKIN;
+        ctx.fillRect(x + 2, y, 6, 6);
+        ctx.fillStyle = C.WHITE;
+        ctx.fillRect(x + 6, y - 2, 6, 3);
+        ctx.fillRect(x, y + 18, 4, 8);
+        ctx.fillRect(x + 6, y + 18, 4, 8);
+
+        ctx.fillStyle = C.WOOD;
+        if (swing) {
+          ctx.fillRect(x + 10, y + 4, 12, 4);
+        } else {
+          ctx.fillRect(x + 10, y + 10, 4, 14);
+        }
+      }
+
+      drawPanel(x, y, w, h) {
+        ctx.fillStyle = C.NAVY;
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = C.GOLD;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        ctx.strokeStyle = C.WHITE;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+      }
+
+      drawTitle() {
+        this.drawSkyGrass();
+        this.drawCrowd();
+        this.drawPitch();
+        this.drawBatsman(250, 108, false);
+        this.drawBowler(70, 92, (this.title_tick % 20) < 10);
+
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(18, 8, 284, 42);
+        ctx.strokeStyle = C.GOLD;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(18, 8, 284, 42);
+
+        blitTextCenter("8-BIT CRICKET", 160, 14, C.GOLD, 2);
+        blitTextCenter("RETRO TEST MATCH", 160, 34, C.CREAM, 1);
+
+        if (Math.floor(this.title_tick / 30) % 2 === 0) {
+          blitTextCenter("PRESS SPACE OR ENTER", 160, 154, C.WHITE, 1);
+        }
+        blitTextCenter("VERCEL CLOUD EDITION", 160, 168, C.CYAN, 1);
+      }
+
+      drawMenu() {
+        this.drawSkyGrass();
+        this.drawCrowd();
+        this.drawPitch();
+
+        const name = (this.user ? this.user.username : "PLAYER 1").toUpperCase();
+        const high = this.user ? this.user.high_score : 0;
+        const played = this.user ? this.user.matches_played : 0;
+
+        this.drawPanel(16, 10, 288, 36);
+        blitText(`BATSMAN: ${name}`, 24, 16, C.WHITE, 1);
+        blitText(`BEST ${high}  MATCHES ${played}`, 24, 28, C.CREAM, 1);
+
+        const items = ["BAT NOW", "RECORDS", "SETTINGS"];
+        for (let i = 0; i < items.length; i++) {
+          const y = 60 + i * 22;
+          const on = i === this.menu_index;
+          ctx.fillStyle = on ? C.NAVY : C.BLACK;
+          ctx.fillRect(90, y, 140, 18);
+          ctx.strokeStyle = on ? C.GOLD : C.GRAY;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(90, y, 140, 18);
+          const label = on ? `> ${items[i]}` : `  ${items[i]}`;
+          blitTextCenter(label, 160, y + 5, on ? C.GOLD : C.WHITE, 1);
+        }
+
+        blitTextCenter("USE ARROWS OR BUTTONS", 160, 160, C.WHITE, 1);
+      }
+
+      drawTarget() {
+        this.drawSkyGrass();
+        this.drawCrowd();
+        this.drawPitch();
+        this.drawBowler(40, 92, false);
+        this.drawBatsman(246, 100, false);
+
+        this.drawPanel(38, 30, 244, 112);
+        const m = this.match;
+        const overs = `${Math.floor(m.target_balls / 6)}.${m.target_balls % 6}`;
+
+        blitTextCenter("CHASE TARGET", 160, 40, C.GOLD, 2);
+        blitTextCenter(`SCORE ${m.target_runs} RUNS`, 160, 68, C.WHITE, 2);
+        blitTextCenter(`IN ${m.target_balls} BALLS (${overs} OVERS)`, 160, 88, C.CREAM, 1);
+        blitTextCenter("SPACE TO BAT", 160, 118, C.CYAN, 1);
+      }
+
+      drawPlay() {
+        this.drawSkyGrass();
+        this.drawCrowd();
+        this.drawPitch();
+
+        const run = this.phase === "runup";
+        this.drawBowler(Math.floor(this.bowler_x), 92, run);
+        const swinging = this.phase === "result" && this.swung && this.phase_t < 20;
+        this.drawBatsman(246, 100, swinging);
+
+        if (["runup", "ball", "result"].includes(this.phase)) {
+          const mx = Math.floor(this.land_x);
+          const my = Math.floor(this.land_y);
+          ctx.fillStyle = C.DARK_RED;
+          ctx.fillRect(mx - 3, my - 1, 7, 3);
+          ctx.fillStyle = C.RED;
+          ctx.fillRect(mx - 1, my - 2, 3, 5);
+        }
+
+        if (this.phase === "ball") {
+          const bx = Math.floor(this.ball_x);
+          const by = Math.floor(this.ball_y - this.ball_z);
+          ctx.fillStyle = C.BLACK;
+          ctx.fillRect(bx + 1, Math.floor(this.ball_y) + 6, 4, 2);
+          ctx.fillStyle = C.RED;
+          ctx.fillRect(bx, by, 4, 4);
+          ctx.fillStyle = C.WHITE;
+          ctx.fillRect(bx + 1, by + 1, 1, 1);
+        }
+
+        // Top HUD
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(0, 0, W, 22);
+        const m = this.match;
+        const name = (this.user ? this.user.username : "PLAYER").substring(0, 8);
+        blitText(`${name} ${m.runs}/${m.wickets}`, 4, 4, C.WHITE, 1);
+        blitText(`TGT ${m.target_runs} IN ${m.target_balls - m.balls}`, 126, 4, C.CREAM, 1);
+        blitText(`4S ${m.fours}  6S ${m.sixes}`, 230, 4, C.GOLD, 1);
+
+        // Bottom HUD
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(0, 158, W, 22);
+        const thisOver = m.over_runs.slice(-6).join(' ') || "-";
+        blitText(`O:${thisOver}`, 112, 162, C.WHITE, 1);
+        blitText(`SHOT:${this.shot}`, 196, 162, C.CYAN, 1);
+        if (isMuted) blitText("[MUTED]", 262, 162, C.PINK, 1);
+
+        // Energy Bar
+        const barX = 4, barY = 169, barW = 70, barH = 7;
+        const energyRatio = m.energy / MAX_ENERGY;
+        const energyColor = energyRatio > 0.5 ? C.GRASS : (energyRatio > 0.25 ? C.GOLD : C.RED);
+        blitText("ENG", barX, 160, C.CREAM, 1);
+        ctx.strokeStyle = C.WHITE;
+        ctx.strokeRect(barX, barY, barW, barH);
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(barX + 1, barY + 1, barW - 2, barH - 2);
+
+        const fillW = Math.floor((barW - 2) * energyRatio);
+        if (fillW > 0) {
+          ctx.fillStyle = energyColor;
+          ctx.fillRect(barX + 1, barY + 1, fillW, barH - 2);
+        }
+        blitText(String(m.energy), barX + barW + 4, 169, energyColor, 1);
+        const driveCost = this.shotEnergyCost("DRIVE");
+        const loftCost = this.shotEnergyCost("LOFT");
+        blitText(`D${driveCost} L${loftCost}`, 112, 169, C.CREAM, 1);
+
+        // Phase Indicators
+        if (this.phase === "idle") {
+          blitTextCenter("SPACE TO FACE  LEFT/RIGHT SHOT", 160, 28, C.WHITE, 1);
+        } else if (this.phase === "ball") {
+          // Timing Meter
+          ctx.fillStyle = C.BLACK;
+          ctx.fillRect(90, 26, 140, 10);
+          ctx.strokeStyle = C.WHITE;
+          ctx.strokeRect(90, 26, 140, 10);
+
+          const goldX = Math.max(90, Math.min(214, 90 + Math.floor(this.sweet_spot * 136) - 8));
+          ctx.fillStyle = C.GOLD;
+          ctx.fillRect(goldX, 26, 16, 10);
+
+          const needleX = 90 + Math.floor(this.timing * 136);
+          ctx.fillStyle = C.RED;
+          ctx.fillRect(needleX, 26, 4, 10);
+
+          blitTextCenter("TIME YOUR SWING!", 160, 40, C.CREAM, 1);
+        } else if (this.phase === "runup") {
+          blitTextCenter(this.ball_kind, 160, 28, C.PINK, 1);
+        }
+
+        // Chips
+        for (const chip of this.chips) {
+          blitTextCenter(chip.text, 160, Math.floor(chip.y), chip.color, 2);
+        }
+      }
+
+      drawPause() {
+        this.drawPlay();
+        this.drawPanel(75, 40, 170, 95);
+        blitTextCenter("PAUSED", 160, 48, C.GOLD, 2);
+
+        const items = ["RESUME", "QUIT TO MENU"];
+        for (let i = 0; i < items.length; i++) {
+          const y = 74 + i * 22;
+          const on = i === this.pause_index;
+          ctx.fillStyle = on ? C.NAVY : C.BLACK;
+          ctx.fillRect(95, y, 130, 18);
+          ctx.strokeStyle = on ? C.GOLD : C.GRAY;
+          ctx.strokeRect(95, y, 130, 18);
+          const label = on ? `> ${items[i]}` : `  ${items[i]}`;
+          blitTextCenter(label, 160, y + 5, on ? C.GOLD : C.WHITE, 1);
+        }
+        blitTextCenter("ARROWS + ENTER OR ESC", 160, 122, C.GRAY, 1);
+      }
+
+      drawResult() {
+        this.drawSkyGrass();
+        this.drawPanel(32, 16, 256, 144);
+        const m = this.match;
+        const result = m.won ? "TARGET CHASED!" : "INNINGS OVER";
+        const resultColor = m.won ? C.GOLD : C.RED;
+
+        blitTextCenter(result, 160, 24, resultColor, 2);
+        blitTextCenter(`${m.runs} RUNS`, 160, 46, C.WHITE, 2);
+        blitTextCenter(`${m.wickets} DOWN   ${m.overs_text} OVERS`, 160, 68, C.CREAM, 1);
+
+        const targetStatus = m.won ? "TARGET MET" : `TARGET ${m.target_runs}`;
+        blitTextCenter(targetStatus, 160, 82, m.won ? C.GOLD : C.PINK, 1);
+        blitTextCenter(`${m.fours} FOURS   ${m.sixes} SIXES`, 160, 94, C.CYAN, 1);
+
+        const againOn = this.result_index === 0;
+        ctx.fillStyle = againOn ? C.NAVY : C.BLACK;
+        ctx.fillRect(44, 120, 110, 18);
+        ctx.strokeStyle = againOn ? C.GOLD : C.GRAY;
+        ctx.strokeRect(44, 120, 110, 18);
+        blitTextCenter("PLAY AGAIN", 99, 125, againOn ? C.GOLD : C.WHITE, 1);
+
+        const menuOn = this.result_index === 1;
+        ctx.fillStyle = menuOn ? C.NAVY : C.BLACK;
+        ctx.fillRect(166, 120, 110, 18);
+        ctx.strokeStyle = menuOn ? C.GOLD : C.GRAY;
+        ctx.strokeRect(166, 120, 110, 18);
+        blitTextCenter("MAIN MENU", 221, 125, menuOn ? C.GOLD : C.WHITE, 1);
+
+        blitTextCenter("SPACE: PLAY AGAIN   ENTER: SELECT", 160, 144, C.GRAY, 1);
+      }
+
+      drawRecords() {
+        ctx.fillStyle = C.NAVY;
+        ctx.fillRect(0, 0, W, H);
+        this.drawPanel(8, 6, 304, 140);
+        blitTextCenter("RECORDS & STATS", 160, 10, C.GOLD, 2);
+
+        const records = loadMatches();
+        const perPage = 7;
+        const totalPages = Math.max(1, Math.ceil(records.length / perPage));
+
+        blitText("#  SCORE  OVERS  4S 6S", 16, 38, C.CYAN, 1);
+        ctx.fillStyle = C.GRAY;
+        ctx.fillRect(16, 48, 288, 1);
+
+        if (records.length === 0) {
+          blitTextCenter("NO SCORES YET - GO BAT!", 160, 80, C.GRAY, 1);
+        } else {
+          const start = this.records_page * perPage;
+          const pageRecs = records.slice(start, start + perPage);
+          for (let i = 0; i < pageRecs.length; i++) {
+            const r = pageRecs[i];
+            const overs = `${Math.floor(r.balls / 6)}.${r.balls % 6}`;
+            const num = records.length - (start + i);
+            const line = `${num < 10 ? ' ' : ''}${num}  ${r.runs}/${r.wickets}   ${overs}    ${r.fours}  ${r.sixes}`;
+            blitText(line, 16, 54 + i * 11, C.WHITE, 1);
+          }
+        }
+
+        blitTextCenter(`PAGE ${this.records_page + 1}/${totalPages}`, 160, 134, C.GOLD, 1);
+
+        // Buttons
+        const prevCol = this.records_page > 0 ? C.GOLD : C.GRAY;
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(12, 150, 90, 18);
+        ctx.strokeStyle = prevCol;
+        ctx.strokeRect(12, 150, 90, 18);
+        blitTextCenter("PREV", 57, 155, prevCol, 1);
+
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(110, 150, 100, 18);
+        ctx.strokeStyle = C.GOLD;
+        ctx.strokeRect(110, 150, 100, 18);
+        blitTextCenter("BACK", 160, 155, C.GOLD, 1);
+
+        const nextCol = this.records_page + 1 < totalPages ? C.GOLD : C.GRAY;
+        ctx.fillStyle = C.BLACK;
+        ctx.fillRect(218, 150, 90, 18);
+        ctx.strokeStyle = nextCol;
+        ctx.strokeRect(218, 150, 90, 18);
+        blitTextCenter("NEXT", 263, 155, nextCol, 1);
+      }
+
+      // --- Input Handling ---
+      handleKey(key) {
+        initAudio();
+        const shots = ["DEFEND", "DRIVE", "LOFT"];
+
+        if (this.state === "TITLE") {
+          if (key === " " || key === "Enter") {
+            sfxOk();
+            this.state = "MENU";
+            this.menu_index = 0;
+          }
+        } else if (this.state === "MENU") {
+          if (key === "ArrowUp" || key === "w" || key === "W") {
+            this.menu_index = (this.menu_index - 1 + 3) % 3;
+            sfxBowl();
+          } else if (key === "ArrowDown" || key === "s" || key === "S") {
+            this.menu_index = (this.menu_index + 1) % 3;
+            sfxBowl();
+          } else if (key === "Enter" || key === " ") {
+            if (this.menu_index === 0) {
+              this.startMatch();
+            } else if (this.menu_index === 1) {
+              this.state = "RECORDS";
+              this.records_page = 0;
+              sfxOk();
+            } else {
+              const name = prompt("Enter Batsman Name:", this.user.username);
+              if (name && name.trim()) {
+                this.user.username = name.trim().toUpperCase().substring(0, 14);
+                saveLocalUser(this.user);
+                this.setFlash(`HI ${this.user.username}`);
+              }
+            }
+          }
+        } else if (this.state === "TARGET") {
+          if (key === " " || key === "Enter") {
+            this.state = "PLAY";
+            sfxOk();
+          }
+        } else if (this.state === "PLAY") {
+          if (key === "ArrowLeft" || key === "a" || key === "A") {
+            this.shot_index = (this.shot_index - 1 + 3) % 3;
+            this.shot = shots[this.shot_index];
+            sfxBowl();
+          } else if (key === "ArrowRight" || key === "d" || key === "D") {
+            this.shot_index = (this.shot_index + 1) % 3;
+            this.shot = shots[this.shot_index];
+            sfxBowl();
+          } else if (key === " ") {
+            if (this.phase === "idle") {
+              this.startDelivery();
+            } else if (this.phase === "ball" && !this.swung) {
+              this.swing();
+            }
+          } else if (key === "Escape") {
+            this.state = "PAUSE";
+            this.pause_index = 0;
+            sfxBowl();
+          }
+        } else if (this.state === "PAUSE") {
+          if (key === "ArrowUp" || key === "ArrowDown" || key === "w" || key === "s") {
+            this.pause_index = (this.pause_index + 1) % 2;
+            sfxBowl();
+          } else if (key === "Enter" || key === " ") {
+            if (this.pause_index === 0) {
+              this.state = "PLAY";
+              sfxOk();
+            } else {
+              this.state = "MENU";
+              sfxBad();
+            }
+          } else if (key === "Escape") {
+            this.state = "PLAY";
+            sfxOk();
+          }
+        } else if (this.state === "RESULT") {
+          if (key === "ArrowLeft" || key === "ArrowRight" || key === "a" || key === "d") {
+            this.result_index = (this.result_index + 1) % 2;
+            sfxBowl();
+          } else if (key === " ") {
+            this.startMatch();
+          } else if (key === "Enter") {
+            if (this.result_index === 0) this.startMatch();
+            else this.state = "MENU";
+          } else if (key === "Escape") {
+            this.state = "MENU";
+          }
+        } else if (this.state === "RECORDS") {
+          const records = loadMatches();
+          const totalPages = Math.max(1, Math.ceil(records.length / 7));
+          if (key === "ArrowLeft" || key === "a") {
+            if (this.records_page > 0) { this.records_page--; sfxBowl(); }
+          } else if (key === "ArrowRight" || key === "d") {
+            if (this.records_page + 1 < totalPages) { this.records_page++; sfxBowl(); }
+          } else if (key === "Escape" || key === "Enter" || key === " ") {
+            this.state = "MENU";
+          }
+        }
+
+        if (key === "m" || key === "M") {
+          isMuted = !isMuted;
+          document.getElementById('btnMute').textContent = isMuted ? "🔇 UNMUTE" : "🔊 MUTE";
+          this.setFlash(isMuted ? "SOUND OFF" : "SOUND ON", 90);
+        }
+      }
+    }
+
+    const game = new Game();
+
+    // Key Listeners
+    window.addEventListener('keydown', (e) => {
+      if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
+        e.preventDefault();
+      }
+      game.handleKey(e.key);
+    });
+
+    // Virtual Buttons for Mobile & Click
+    document.getElementById('btnSpace').addEventListener('click', () => game.handleKey(' '));
+    document.getElementById('btnShotLeft').addEventListener('click', () => game.handleKey('ArrowLeft'));
+    document.getElementById('btnShotRight').addEventListener('click', () => game.handleKey('ArrowRight'));
+    document.getElementById('btnEnter').addEventListener('click', () => game.handleKey('Enter'));
+    document.getElementById('btnEsc').addEventListener('click', () => game.handleKey('Escape'));
+    document.getElementById('btnMute').addEventListener('click', () => game.handleKey('m'));
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clickY = ((e.clientY - rect.top) / rect.height) * 180;
+      if (game.state === "RECORDS" && clickY > 140) {
+        const clickX = ((e.clientX - rect.left) / rect.width) * 320;
+        if (clickX < 105) game.handleKey('ArrowLeft');
+        else if (clickX > 210) game.handleKey('ArrowRight');
+        else game.handleKey('Escape');
+      } else {
+        game.handleKey(' ');
+      }
+    });
+
+    // Main Game Loop (60 FPS)
+    function loop() {
+      game.update();
+      game.draw();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

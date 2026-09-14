@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
+from pathlib import Path
 import random
 from dataclasses import dataclass, field
 
-import pygame
+try:
+    import pygame
+except Exception:
+    pygame = None
 
 import auth
 from pixel import blit_text, blit_text_center, dither_rect, scanlines, text_width
@@ -99,6 +105,8 @@ class Chip:
 
 class CricketGame:
     def __init__(self) -> None:
+        if pygame is None:
+            raise RuntimeError("Pygame is required to run the desktop game client.")
         pygame.init()
         pygame.display.set_caption("8-BIT CRICKET")
         self.window = pygame.display.set_mode((W * SCALE, H * SCALE))
@@ -1117,9 +1125,75 @@ def main() -> None:
     CricketGame().run()
 
 
+# --- Vercel / WSGI Web Application & Serverless Handler ---
+
+WEB_INDEX_FILE = Path(__file__).resolve().parent / "web" / "index.html"
+
+
+def _serve_index() -> bytes:
+    if WEB_INDEX_FILE.exists():
+        return WEB_INDEX_FILE.read_bytes()
+    return b"<!DOCTYPE html><html><body><h1>8-Bit Cricket</h1><p>Web edition loading...</p></body></html>"
+
+
+def app(environ: dict, start_response) -> list[bytes]:
+    """WSGI entrypoint for Vercel and WSGI servers."""
+    path = environ.get("PATH_INFO", "/") or "/"
+
+    if path in ("/api/status", "/api/health"):
+        body = json.dumps(
+            {
+                "status": "ok",
+                "game": "8-Bit Cricket",
+                "version": "1.0.0",
+                "platform": "Vercel Serverless / Web",
+            }
+        ).encode("utf-8")
+        status = "200 OK"
+        headers = [
+            ("Content-Type", "application/json; charset=utf-8"),
+            ("Content-Length", str(len(body))),
+            ("Cache-Control", "no-cache"),
+        ]
+        start_response(status, headers)
+        return [body]
+
+    if path == "/api/leaderboard":
+        try:
+            scores = auth.leaderboard(10)
+            data = [{"username": u, "best": s} for u, s in scores]
+        except Exception:
+            data = []
+        body = json.dumps({"leaderboard": data}).encode("utf-8")
+        status = "200 OK"
+        headers = [
+            ("Content-Type", "application/json; charset=utf-8"),
+            ("Content-Length", str(len(body))),
+        ]
+        start_response(status, headers)
+        return [body]
+
+    # Serve the retro arcade web client for all other routes
+    content = _serve_index()
+    status = "200 OK"
+    headers = [
+        ("Content-Type", "text/html; charset=utf-8"),
+        ("Content-Length", str(len(content))),
+        ("Cache-Control", "public, max-age=3600"),
+    ]
+    start_response(status, headers)
+    return [content]
+
+
+# Export top-level application and handler aliases required by Vercel
+application = app
+handler = app
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception:
-        pygame.quit()
+        if pygame is not None:
+            pygame.quit()
         raise
